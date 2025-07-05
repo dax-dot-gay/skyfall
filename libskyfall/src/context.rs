@@ -1,8 +1,11 @@
 use std::{ collections::HashMap, fmt::Debug, ops::{ Deref, DerefMut }, sync::Arc };
 
-use iroh::{ endpoint::{ Connection, VarInt }, Endpoint, NodeAddr, NodeId };
-use oqs::{ kem, sig };
+use iroh::{ endpoint::Connection, Endpoint, NodeAddr };
+use oqs::{ kem::{self, Ciphertext}, sig };
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use serde_with::base64::Base64;
+use uuid::Uuid;
 
 use crate::{ identity::{ KEM_ALGO, SIG_ALGO }, Identity, PublicIdentity };
 

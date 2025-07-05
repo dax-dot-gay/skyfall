@@ -23,6 +23,12 @@ pub enum Error {
     #[error("IROH protocol error: {0:?}")]
     Iroh(IrohError),
 
+    #[error("MsgPack encoding error: {0:?}")]
+    MsgpackEncoding(#[from] rmp_serde::encode::Error),
+
+    #[error("MsgPack decoding error: {0:?}")]
+    MsgpackDecoding(#[from] rmp_serde::decode::Error),
+
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error)
 }
