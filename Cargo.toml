@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["libskyfall", "clients/skyfall-desktop/src-tauri"]
