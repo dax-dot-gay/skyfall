@@ -1,5 +1,6 @@
 use aes_gcm::aead::rand_core;
 use bon::Builder;
+use iroh::RelayUrl;
 use names::Generator;
 use oqs::{ kem, sig };
 use serde::{ Deserialize, Serialize };
@@ -34,6 +35,7 @@ pub struct Identity {
 
     #[builder(default)]
     profile: Profile,
+    preferred_relay: Option<RelayUrl>
 }
 
 impl Identity {
@@ -43,11 +45,13 @@ impl Identity {
     }
 
     pub(self) fn generate_kem_keypair() -> (kem::PublicKey, kem::SecretKey) {
+        oqs::init();
         let _kem = kem::Kem::new(KEM_ALGO).expect("Unable to create KEM instance");
         _kem.keypair().expect("Unable to generate KEM keypair")
     }
 
     pub(self) fn generate_sig_keypair() -> (sig::PublicKey, sig::SecretKey) {
+        oqs::init();
         let _sig = sig::Sig::new(SIG_ALGO).expect("Unable to create SIG instance");
         _sig.keypair().expect("Unable to generate SIG keypair")
     }
@@ -72,6 +76,14 @@ impl Identity {
         self.profile.clone()
     }
 
+    pub fn profile_mut(&mut self) -> &mut Profile {
+        &mut self.profile
+    }
+
+    pub fn preferred_relay(&self) -> Option<RelayUrl> {
+        self.preferred_relay.clone()
+    }
+
     pub fn id(&self) -> String {
         let mut combined = Vec::new();
         combined.extend(self.iroh_public().as_bytes().to_vec());
@@ -87,6 +99,7 @@ impl Identity {
             node: self.iroh_public(),
             encryption: self.encryption_keypair().0,
             signing: self.signing_keypair().0,
+            preferred_relay: self.preferred_relay()
         }
     }
 }
@@ -104,4 +117,5 @@ pub struct PublicIdentity {
     pub node: iroh::NodeId,
     pub encryption: kem::PublicKey,
     pub signing: sig::PublicKey,
+    pub preferred_relay: Option<RelayUrl>
 }
