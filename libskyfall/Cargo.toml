@@ -26,3 +26,4 @@ typenum = "1.18.0"
 crc = "3.3.0"
 iroh-quinn-proto = "0.13.0"
 futures = { version = "0.3.31", features = ["compat", "io-compat"] }
+async-channel = "2.5.0"

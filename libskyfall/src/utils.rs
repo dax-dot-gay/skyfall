@@ -1,7 +1,7 @@
 use serde::{ Deserialize, Serialize };
 use iroh_quinn_proto::{ Side as IrohSide, Dir as IrohDir };
 
-use crate::PublicIdentity;
+use crate::Profile;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Side {
@@ -123,6 +123,6 @@ pub enum InterfaceMessage {
         name: String
     },
     ChangingProfile {
-        new_profile: PublicIdentity
+        new_profile: Profile
     }
 }

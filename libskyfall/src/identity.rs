@@ -15,6 +15,7 @@ pub const SIG_ALGO: sig::Algorithm = sig::Algorithm::MlDsa65;
 pub struct Profile {
     #[builder(default = Generator::default().next().unwrap())]
     pub display_name: String,
+    pub preferred_relay: Option<RelayUrl>
 }
 
 impl Default for Profile {
@@ -35,8 +36,7 @@ pub struct Identity {
     sig_keypair: (sig::PublicKey, sig::SecretKey),
 
     #[builder(default)]
-    profile: Profile,
-    preferred_relay: Option<RelayUrl>
+    profile: Profile
 }
 
 impl Identity {
@@ -82,7 +82,7 @@ impl Identity {
     }
 
     pub fn preferred_relay(&self) -> Option<RelayUrl> {
-        self.preferred_relay.clone()
+        self.profile().preferred_relay
     }
 
     pub fn id(&self) -> String {
@@ -99,8 +99,7 @@ impl Identity {
             profile: self.profile(),
             node: self.iroh_public(),
             encryption: self.encryption_keypair().0,
-            signing: self.signing_keypair().0,
-            preferred_relay: self.preferred_relay()
+            signing: self.signing_keypair().0
         }
     }
 }
@@ -117,8 +116,7 @@ pub struct PublicIdentity {
     pub profile: Profile,
     pub node: iroh::NodeId,
     pub encryption: kem::PublicKey,
-    pub signing: sig::PublicKey,
-    pub preferred_relay: Option<RelayUrl>
+    pub signing: sig::PublicKey
 }
 
 impl PublicIdentity {
