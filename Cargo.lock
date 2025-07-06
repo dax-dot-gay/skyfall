@@ -3004,6 +3004,7 @@ dependencies = [
  "base64 0.22.1",
  "bon",
  "chrono",
+ "crc",
  "iroh",
  "names",
  "oqs",

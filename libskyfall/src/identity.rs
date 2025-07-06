@@ -3,6 +3,7 @@ use bon::Builder;
 use iroh::RelayUrl;
 use names::Generator;
 use oqs::{ kem, sig };
+use rmp_serde::config::BytesMode;
 use serde::{ Deserialize, Serialize };
 use sha2::Digest;
 use base64::prelude::*;
@@ -10,7 +11,7 @@ use base64::prelude::*;
 pub const KEM_ALGO: kem::Algorithm = kem::Algorithm::MlKem768;
 pub const SIG_ALGO: sig::Algorithm = sig::Algorithm::MlDsa65;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Builder)]
+#[derive(Serialize, Deserialize, Clone, Debug, Builder, PartialEq, Eq)]
 pub struct Profile {
     #[builder(default = Generator::default().next().unwrap())]
     pub display_name: String,
@@ -110,7 +111,7 @@ impl Default for Identity {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PublicIdentity {
     pub id: String,
     pub profile: Profile,
@@ -118,4 +119,19 @@ pub struct PublicIdentity {
     pub encryption: kem::PublicKey,
     pub signing: sig::PublicKey,
     pub preferred_relay: Option<RelayUrl>
+}
+
+impl PublicIdentity {
+    pub fn encode(self) -> crate::Result<Vec<u8>> {
+        let buffer: Vec<u8> = Vec::new();
+        let mut serializer = rmp_serde::encode::Serializer
+            ::new(buffer)
+            .with_bytes(BytesMode::ForceIterables);
+        self.serialize(&mut serializer)?;
+        Ok(serializer.into_inner())
+    }
+
+    pub fn decode(data: Vec<u8>) -> crate::Result<Self> {
+        Ok(rmp_serde::decode::from_slice::<Self>(&data)?)
+    }
 }

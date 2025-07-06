@@ -1,6 +1,6 @@
 use aes_gcm::Nonce;
 use bon::bon;
-use oqs::kem::Ciphertext;
+use oqs::{kem::Ciphertext, sig::Signature};
 use rmp_serde::config::BytesMode;
 use serde::{ Deserialize, Serialize };
 use serde_with::base64::Base64;
@@ -19,6 +19,7 @@ pub struct Message {
     shared_secret: Ciphertext,
     #[serde_as(as = "UB64")]
     data: Vec<u8>,
+    signature: Signature
 }
 
 #[bon]
@@ -37,12 +38,13 @@ impl Message {
     }
 
     #[builder]
-    pub(crate) fn new(nonce: Nonce<U12>, shared_secret: Ciphertext, data: Vec<u8>) -> Self {
+    pub(crate) fn new(nonce: Nonce<U12>, shared_secret: Ciphertext, data: Vec<u8>, signature: Signature) -> Self {
         Self {
             id: Uuid::new_v4(),
             nonce: nonce.to_vec(),
             shared_secret,
-            data
+            data,
+            signature
         }
     }
 
@@ -60,5 +62,9 @@ impl Message {
 
     pub fn data(&self) -> Vec<u8> {
         self.data.clone()
+    }
+
+    pub fn signature(&self) -> Signature {
+        self.signature.clone()
     }
 }

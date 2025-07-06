@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::PublicIdentity;
 
 #[derive(thiserror::Error, Debug)]
@@ -6,7 +8,31 @@ pub enum IrohError {
     Connection(#[from] iroh::endpoint::ConnectionError),
 
     #[error(transparent)]
-    Connect(#[from] iroh::endpoint::ConnectError)
+    Connect(#[from] iroh::endpoint::ConnectError),
+
+    #[error(transparent)]
+    ClosedStream(#[from] iroh::endpoint::ClosedStream),
+
+    #[error(transparent)]
+    Write(#[from] iroh::endpoint::WriteError),
+
+    #[error(transparent)]
+    Read(#[from] iroh::endpoint::ReadError),
+
+    #[error(transparent)]
+    ReadExact(#[from] iroh::endpoint::ReadExactError),
+}
+
+#[derive(thiserror::Error, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BadPacket {
+    #[error("Missing magic number (packet is either misaligned or corrupted)")]
+    MissingMagic,
+    #[error("Unknown packet type: {0}")]
+    UnknownType(u8),
+    #[error("Unexpected packet type (wrong ordering)")]
+    UnexpectedType,
+    #[error("Mismatch between START/STOP details (corrupted datastream)")]
+    StartStopMismatch
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -29,6 +55,24 @@ pub enum Error {
     #[error("MsgPack decoding error: {0:?}")]
     MsgpackDecoding(#[from] rmp_serde::decode::Error),
 
+    #[error("AES cryptography error: {0:?}")]
+    Aes(#[from] aes_gcm::Error),
+
+    #[error("Decrypted message failed signature verification: {0:?}")]
+    SignatureVerificationFailed(oqs::Error),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("Bad packet: {0:?}")]
+    BadPacket(BadPacket),
+
+    #[error("Malformed stream data: expected checksum {0}, received {1}.")]
+    StreamChecksumMismatch(u16, u16),
+
+    #[error("Peer identity does not match the expected value.")]
+    PeerIdentityMismatch,
+
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error)
 }
@@ -46,6 +90,26 @@ impl Error {
 
     pub fn not_connected(id: impl AsRef<str>) -> Self {
         Self::NotConnected(id.as_ref().to_string())
+    }
+
+    pub fn signature_verification(error: oqs::Error) -> Self {
+        Self::SignatureVerificationFailed(error)
+    }
+
+    pub fn packet_missing_magic() -> Self {
+        Self::BadPacket(BadPacket::MissingMagic)
+    }
+
+    pub fn packet_unknown_type(typ: impl Into<u8>) -> Self {
+        Self::BadPacket(BadPacket::UnknownType(typ.into()))
+    }
+
+    pub fn packet_unexpected_type() -> Self {
+        Self::BadPacket(BadPacket::UnexpectedType)
+    }
+
+    pub fn packet_ss_mismatch() -> Self {
+        Self::BadPacket(BadPacket::StartStopMismatch)
     }
 }
 

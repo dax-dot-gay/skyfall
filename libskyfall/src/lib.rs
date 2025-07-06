@@ -4,8 +4,9 @@ pub mod identity;
 pub use identity::{Identity, Profile, PublicIdentity};
 
 pub mod context;
-mod crypto;
+pub use context::{ALPN, Context, ContextConnection};
 
+mod crypto;
 pub use crypto::Message;
 
 pub(crate) use error::{Error, Result};
