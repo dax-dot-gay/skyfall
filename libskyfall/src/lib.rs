@@ -10,7 +10,9 @@ mod crypto;
 pub use crypto::Message;
 
 pub mod utils;
-pub mod channel;
+mod channel;
+
+pub use channel::Channel;
 
 pub(crate) use error::{Error, Result};
 pub use error::{Error as SkyfallError, Result as SkyfallResult};

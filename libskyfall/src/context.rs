@@ -11,11 +11,7 @@ use tokio::{ io::{ AsyncReadExt, AsyncWriteExt }, task::JoinHandle };
 use tokio::sync::{ Mutex as AsyncMutex, RwLock as AsyncRwLock };
 
 use crate::{
-    identity::{ KEM_ALGO, SIG_ALGO },
-    utils::{ InterfaceMessage, StreamId },
-    Identity,
-    Message,
-    PublicIdentity,
+    identity::{ KEM_ALGO, SIG_ALGO }, utils::{ InterfaceMessage, StreamId }, Channel, Identity, Message, PublicIdentity
 };
 
 pub const ALPN: &'static [u8] = b"skyfall/0";
@@ -525,6 +521,35 @@ impl Context {
         let encoded = self.decrypt(&connection.peer, encrypted)?;
         Ok((connection.peer, rmp_serde::from_slice::<InterfaceMessage>(&encoded)?))
     }
+
+    pub async fn open_channel(&self, peer: &PublicIdentity, name: impl AsRef<str>) -> crate::Result<Channel> {
+        let name = name.as_ref().to_string();
+        let connection = self.connection(peer.id.clone())?;
+        let created_id = connection.open_stream(name.clone()).await?;
+        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::OpeningStream { id: created_id.clone(), name: name.clone() }).await?;
+        Ok(Channel::new(name.clone(), created_id.clone(), connection))
+    }
+
+    pub async fn close_channel(&self, peer: &PublicIdentity, name: impl AsRef<str>) -> crate::Result<()> {
+        let name = name.as_ref().to_string();
+        let connection = self.connection(peer.id.clone())?;
+        connection.close_stream(name.clone()).await?;
+        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::ClosingStream { name: name.clone() }).await?;
+        Ok(())
+    }
+
+    pub async fn get_channel(&self, peer: &PublicIdentity, name: impl AsRef<str>) -> crate::Result<Channel> {
+        let name = name.as_ref().to_string();
+        let connection = self.connection(peer.id.clone())?;
+        let stream_id = connection.get_stream_id(name.clone()).await?;
+
+        Ok(Channel::new(name, stream_id, connection))
+    }
+
+    pub async fn channels(&self, peer: &PublicIdentity) -> crate::Result<Vec<String>> {
+        let connection = self.connection(peer.id.clone())?;
+        Ok(connection.streams().await)
+    }
 }
 
 // Event-loop related functions
@@ -534,12 +559,15 @@ impl Context {
             match message {
                 InterfaceMessage::OpeningStream { id, name } => {
                     let _ = connection.accept_stream(name, id);
-                },
+                }
                 InterfaceMessage::ChangingProfile { new_profile } => {
                     let mut connections = ctx.connections.write();
                     if let Some(target) = connections.get_mut(&peer.id) {
                         target.peer.profile = new_profile;
                     }
+                }
+                InterfaceMessage::ClosingStream { name } => {
+                    let _ = connection.close_stream(name).await;
                 },
             }
         }

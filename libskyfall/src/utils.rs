@@ -122,6 +122,9 @@ pub enum InterfaceMessage {
         id: StreamId,
         name: String
     },
+    ClosingStream {
+        name: String
+    },
     ChangingProfile {
         new_profile: Profile
     }
