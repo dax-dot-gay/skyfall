@@ -73,6 +73,15 @@ pub enum Error {
     #[error("Peer identity does not match the expected value.")]
     PeerIdentityMismatch,
 
+    #[error("Unknown stream: {0}")]
+    UnknownStream(String),
+
+    #[error("Stream already exists.")]
+    StreamExists,
+
+    #[error("Stream ID mismatch.")]
+    StreamIdMismatch,
+
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error)
 }
@@ -110,6 +119,10 @@ impl Error {
 
     pub fn packet_ss_mismatch() -> Self {
         Self::BadPacket(BadPacket::StartStopMismatch)
+    }
+
+    pub fn unknown_stream(id: impl AsRef<str>) -> Self {
+        Self::UnknownStream(id.as_ref().to_string())
     }
 }
 
