@@ -11,7 +11,12 @@ use tokio::{ io::{ AsyncReadExt, AsyncWriteExt }, task::JoinHandle };
 use tokio::sync::{ Mutex as AsyncMutex, RwLock as AsyncRwLock };
 
 use crate::{
-    identity::{ KEM_ALGO, SIG_ALGO }, utils::{ InterfaceMessage, StreamId }, Channel, Identity, Message, PublicIdentity
+    identity::{ KEM_ALGO, SIG_ALGO },
+    utils::{ InterfaceMessage, StreamId },
+    Channel,
+    Identity,
+    Message,
+    PublicIdentity,
 };
 
 pub const ALPN: &'static [u8] = b"skyfall/0";
@@ -23,7 +28,7 @@ pub const MAGIC: u16 = 0x2bf1;
 enum PacketKind {
     START = 0,
     DATA = 1,
-    STOP = 2,
+    FINALDATA = 2,
 }
 
 impl TryFrom<u8> for PacketKind {
@@ -32,7 +37,7 @@ impl TryFrom<u8> for PacketKind {
         match value {
             0 => Ok(Self::START),
             1 => Ok(Self::DATA),
-            2 => Ok(Self::STOP),
+            2 => Ok(Self::FINALDATA),
             other => Err(crate::Error::packet_unknown_type(other)),
         }
     }
@@ -45,10 +50,7 @@ enum Packet {
         datasize: u64,
     },
     Data(Vec<u8>),
-    Stop {
-        checksum: u16,
-        datasize: u64,
-    },
+    FinalData(Vec<u8>),
 }
 
 impl Packet {
@@ -68,7 +70,7 @@ impl Packet {
             }
         };
 
-        Ok(match packet_type {
+        let result = match packet_type {
             PacketKind::START => {
                 let checksum = stream.read_u16().await?;
                 let datasize = stream.read_u64().await?;
@@ -81,14 +83,15 @@ impl Packet {
                 stream.read_exact(&mut _buf).await?;
                 Self::Data(_buf.to_vec())
             }
-            PacketKind::STOP => {
-                let checksum = stream.read_u16().await?;
-                let datasize = stream.read_u64().await?;
-                let mut _buf = [0; (CHUNKSIZE as usize) - 13];
+            PacketKind::FINALDATA => {
+                let mut _buf = [0; (CHUNKSIZE as usize) - 3];
                 stream.read_exact(&mut _buf).await?;
-                Self::Stop { checksum, datasize }
+                Self::FinalData(_buf.to_vec())
             }
-        })
+        };
+
+        //println!("PACKET: {magic:#x}, {packet_type:?}, {result:?}");
+        Ok(result)
     }
 }
 
@@ -131,24 +134,19 @@ impl ContextConnection {
         stream.write_u64(datasize).await?;
         stream.write_all(&[0; (CHUNKSIZE - 13) as usize]).await?;
 
-        for chunk in data.chunks((CHUNKSIZE - 1) as usize) {
+        for chunk in data.chunks((CHUNKSIZE - 3) as usize) {
             stream.write_u16(MAGIC).await?;
-            stream.write_u8(PacketKind::DATA as u8).await?;
-            if chunk.len() == ((CHUNKSIZE - 1) as usize) {
+            if chunk.len() == ((CHUNKSIZE - 3) as usize) {
+                stream.write_u8(PacketKind::DATA as u8).await?;
                 stream.write_all(chunk).await?;
             } else {
+                stream.write_u8(PacketKind::FINALDATA as u8).await?;
                 stream.write_all(chunk).await?;
                 stream.write_all(
-                    Vec::with_capacity((CHUNKSIZE as usize) - 3 - chunk.len()).as_slice()
+                    vec![0u8; (CHUNKSIZE as usize) - 3 - chunk.len()].as_slice()
                 ).await?;
             }
         }
-
-        stream.write_u16(MAGIC).await?;
-        stream.write_u8(PacketKind::STOP as u8).await?;
-        stream.write_u16(checksum).await?;
-        stream.write_u64(datasize).await?;
-        stream.write_all(&[0; (CHUNKSIZE - 13) as usize]).await?;
 
         Ok(())
     }
@@ -169,20 +167,21 @@ impl ContextConnection {
                     return Err(crate::Error::packet_unexpected_type());
                 }
                 Packet::Data(content) => output.extend(content),
-                Packet::Stop { checksum: stop_checksum, datasize: stop_datasize } => {
-                    if stop_checksum == checksum && stop_datasize == datasize {
-                        break;
-                    } else {
-                        return Err(crate::Error::packet_ss_mismatch());
-                    }
+                Packet::FinalData(content) => {
+                    output.extend(content);
+                    break;
                 }
             }
         }
+
+        let output = output[..datasize as usize].to_vec();
 
         let actual_checksum = crc::Crc::<u16>::new(&crc::CRC_16_IBM_SDLC).checksum(&output);
         if checksum != actual_checksum {
             return Err(crate::Error::StreamChecksumMismatch(checksum, actual_checksum));
         }
+
+        //println!("GOT DATA: {actual_checksum:#x} || CRC: {checksum:#x}");
 
         Ok(output)
     }
@@ -376,12 +375,14 @@ impl Context {
             address = address.with_relay_url(relay);
         }
 
+        //println!("Waiting for connection...");
         let connection = self.endpoint.connect(address.clone(), ALPN).await?;
 
         let (mut send, mut recv) = connection.open_bi().await?;
         send.set_priority(1)?;
 
         ContextConnection::send(&mut send, self.identity.as_public().encode()?).await?;
+        //println!("Sent handshake!");
         let peer_data = PublicIdentity::decode(ContextConnection::recv(&mut recv).await?)?;
         if peer_data != peer.clone() {
             return Err(crate::Error::PeerIdentityMismatch);
@@ -401,16 +402,21 @@ impl Context {
     }
 
     async fn accept(&self) -> crate::Result<Option<String>> {
+        //println!("Waiting to accept...");
         let connection = if let Some(c) = self.endpoint.accept().await {
             c.accept()?.await?
         } else {
             return Ok(None);
         };
 
-        let (mut send, mut recv) = connection.open_bi().await?;
+        //println!("Accepted...");
+
+        let (mut send, mut recv) = connection.accept_bi().await?;
         send.set_priority(1)?;
 
+        //println!("Waiting for client's handshake...");
         let peer_data = PublicIdentity::decode(ContextConnection::recv(&mut recv).await?)?;
+        //println!("Got client handshake: {peer_data:?}");
         ContextConnection::send(&mut send, self.identity.as_public().encode()?).await?;
         let mut connections = self.connections.write();
         let mut address = NodeAddr::new(peer_data.node.clone());
@@ -522,23 +528,40 @@ impl Context {
         Ok((connection.peer, rmp_serde::from_slice::<InterfaceMessage>(&encoded)?))
     }
 
-    pub async fn open_channel(&self, peer: &PublicIdentity, name: impl AsRef<str>) -> crate::Result<Channel> {
+    pub async fn open_channel(
+        &self,
+        peer: &PublicIdentity,
+        name: impl AsRef<str>
+    ) -> crate::Result<Channel> {
         let name = name.as_ref().to_string();
         let connection = self.connection(peer.id.clone())?;
         let created_id = connection.open_stream(name.clone()).await?;
-        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::OpeningStream { id: created_id.clone(), name: name.clone() }).await?;
+        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::OpeningStream {
+            id: created_id.clone(),
+            name: name.clone(),
+        }).await?;
         Ok(Channel::new(name.clone(), created_id.clone(), connection))
     }
 
-    pub async fn close_channel(&self, peer: &PublicIdentity, name: impl AsRef<str>) -> crate::Result<()> {
+    pub async fn close_channel(
+        &self,
+        peer: &PublicIdentity,
+        name: impl AsRef<str>
+    ) -> crate::Result<()> {
         let name = name.as_ref().to_string();
         let connection = self.connection(peer.id.clone())?;
         connection.close_stream(name.clone()).await?;
-        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::ClosingStream { name: name.clone() }).await?;
+        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::ClosingStream {
+            name: name.clone(),
+        }).await?;
         Ok(())
     }
 
-    pub async fn get_channel(&self, peer: &PublicIdentity, name: impl AsRef<str>) -> crate::Result<Channel> {
+    pub async fn get_channel(
+        &self,
+        peer: &PublicIdentity,
+        name: impl AsRef<str>
+    ) -> crate::Result<Channel> {
         let name = name.as_ref().to_string();
         let connection = self.connection(peer.id.clone())?;
         let stream_id = connection.get_stream_id(name.clone()).await?;
@@ -568,7 +591,7 @@ impl Context {
                 }
                 InterfaceMessage::ClosingStream { name } => {
                     let _ = connection.close_stream(name).await;
-                },
+                }
             }
         }
     }
@@ -586,10 +609,13 @@ impl Context {
     }
 
     async fn _accept_incoming_connections(ctx: Context) -> Option<ContextEvent> {
-        if let Ok(Some(peer)) = ctx.accept().await {
-            Some(ContextEvent::AcceptedConnection(peer))
-        } else {
-            None
+        //println!("WAITING TO ACCEPT INCOMING...");
+        match ctx.accept().await {
+            Ok(Some(peer)) => Some(ContextEvent::AcceptedConnection(peer)),
+            _ => {
+                //println!("ACCEPT_FAIL: {other:?}");
+                None
+            }
         }
     }
 
@@ -611,6 +637,7 @@ impl Context {
         let mut listening: HashSet<String> = HashSet::new();
         let mut futs = FuturesUnordered::new();
         futs.push(Self::event_future(FutureGenericArgs::EventListener(events.clone())));
+        futs.push(Self::event_future(FutureGenericArgs::AcceptIncoming(ctx.clone())));
         while let Some(maybe_evt) = futs.next().await {
             if let Some(evt) = maybe_evt {
                 match evt {
