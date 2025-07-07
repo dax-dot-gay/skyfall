@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use iroh::{RelayMap, RelayMode as IrohRelayMode, RelayUrl};
 use serde::{ Deserialize, Serialize };
 use iroh_quinn_proto::{ Side as IrohSide, Dir as IrohDir };
+use uuid::Uuid;
+
+use crate::Profile;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Side {
@@ -125,6 +128,10 @@ pub enum InterfaceMessage {
     },
     ClosingStream {
         name: String
+    },
+    IdentifySelf {
+        profiles: HashMap<Uuid, Profile>,
+        active_profile: Option<Uuid>
     }
 }
 
@@ -161,6 +168,116 @@ impl From<IrohRelayMode> for RelayMode {
             IrohRelayMode::Default => Self::Default,
             IrohRelayMode::Staging => Self::Staging,
             IrohRelayMode::Custom(relay_map) => Self::Custom(relay_map.urls().cloned().collect()),
+        }
+    }
+}
+
+pub struct Router<T> {
+    label: String,
+    value: Option<(T, Vec<String>)>,
+    branches: Vec<Router<T>>
+}
+
+impl<T> Router<T> {
+    /// Constructs a new routing Router.
+    pub fn new() -> Router<T> {
+        Router {
+            label: "".to_string(),
+            value: None,
+            branches: Vec::new()
+        }
+    }
+    /// Adds a new path and its associated value to the Router. Prefix a segment
+    /// with a colon (:) to enable capturing on the segment.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a duplicate route is added.
+    ///
+    pub fn add(&mut self, key: impl AsRef<str>, value: T) {
+        let key = key.as_ref().to_string();
+        let segments = key.split('/').filter_map(|s| if s.is_empty() {None} else {Some(s.to_string())});
+        let capture_labels = Vec::new();    // Will be filled while iterating
+        self.add_(segments, value, capture_labels);
+    }
+    fn add_<I: Iterator<Item=String>>(
+        &mut self, mut segments: I, value: T,
+        mut capture_labels: Vec<String>) {
+        match segments.next() {
+            None => {
+                if self.value.is_some() {
+                    panic!("Duplicate route!");
+                }
+                self.value = Some((value, capture_labels))
+            },
+            Some(segment) => {
+                if let Some(existing_branch) =
+                    self.branches.iter_mut().find(|t| t.label == segment) {
+                        existing_branch.add_(segments, value, capture_labels);
+                        return;
+                    }
+                if segment.starts_with(':') {
+                    capture_labels.push(segment[1..].to_string());
+                    if let Some(existing_branch) =
+                        self.branches.iter_mut().find(|t| t.label.is_empty()) {
+                            existing_branch.add_(
+                                segments, value, capture_labels);
+                            return;
+                        }
+                    let mut branch = Router {
+                        label: "".to_string(),
+                        value: None,
+                        branches: Vec::new()
+                    };
+                    branch.add_(segments, value, capture_labels);
+                    self.branches.push(branch);
+                } else {
+                    let mut branch = Router {
+                        label: segment,
+                        value: None,
+                        branches: Vec::new()
+                    };
+                    branch.add_(segments, value, capture_labels);
+                    self.branches.push(branch);
+                }
+            }
+        }
+    }
+    pub fn find(
+        &self,
+        key: impl AsRef<str>
+        ) -> Option<(&T, Vec<(String, String)>)> {
+        let key = key.as_ref().to_string();
+        let segments: Vec<String> = key.split('/')
+            .filter_map(|s| if s.is_empty() {None} else {Some(s.to_string())})
+            .collect();
+        let mut captured = Vec::new();  // Will be filled while iterating
+        self.find_(segments, &mut captured)
+            .map(|&(ref v, ref labels)| {
+                (v, labels.iter().cloned().zip(captured).collect())
+            })
+    }
+    fn find_(
+        &self,
+        segments: Vec<String>,
+        captured: &mut Vec<String>
+        ) -> Option<&(T, Vec<String>)> {
+        match segments.split_first() {
+            None => self.value.as_ref(),
+            Some((segment, remaining)) => self.branches.iter().filter_map(|t| {
+                if t.label == *segment {
+                    t.find_(remaining.to_vec(), captured)
+                } else if t.label == "" {
+                    captured.push(segment.clone());
+                    let result = t.find_(remaining.to_vec(), captured);
+                    if result.is_none() {
+                        captured.pop();
+                    }
+                    result
+                } else {
+                    None
+                }
+            }).next()
         }
     }
 }

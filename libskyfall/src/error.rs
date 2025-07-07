@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::PublicIdentity;
 
@@ -85,6 +86,9 @@ pub enum Error {
     #[error("Stream ID mismatch.")]
     StreamIdMismatch,
 
+    #[error("Unknown profile: {0:?}")]
+    UnknownProfile(Uuid),
+
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error)
 }
@@ -126,6 +130,10 @@ impl Error {
 
     pub fn unknown_stream(id: impl AsRef<str>) -> Self {
         Self::UnknownStream(id.as_ref().to_string())
+    }
+
+    pub fn unknown_profile(id: Uuid) -> Self {
+        Self::UnknownProfile(id)
     }
 }
 

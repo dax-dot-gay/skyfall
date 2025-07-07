@@ -305,7 +305,7 @@ impl DerefMut for ContextConnection {
 }
 
 #[derive(Debug, Clone)]
-enum ContextEvent {
+pub enum ContextEvent {
     AcceptedConnection(String),
     OpenedConnection(String),
     ClosedConnection(String),
@@ -330,6 +330,7 @@ pub struct Context {
     connections: Arc<RwLock<HashMap<String, ContextConnection>>>,
     event_loop: Option<Arc<JoinHandle<()>>>,
     event_channel: Sender<ContextEvent>,
+    parent_channel: Sender<ContextEvent>
 }
 
 impl Debug for Context {
@@ -344,7 +345,7 @@ impl Debug for Context {
 }
 
 impl Context {
-    pub fn new(identity: Identity, endpoint: Endpoint) -> crate::Result<Self> {
+    pub fn new(identity: Identity, endpoint: Endpoint, parent_channel: Sender<ContextEvent>) -> crate::Result<Self> {
         oqs::init();
 
         let (tx, rx) = async_channel::unbounded::<ContextEvent>();
@@ -357,6 +358,7 @@ impl Context {
             connections: Arc::new(RwLock::new(HashMap::new())),
             event_loop: None,
             event_channel: tx,
+            parent_channel
         };
 
         instance.event_loop = Some(Arc::new(tokio::spawn(Self::event_loop(instance.clone(), rx))));
@@ -586,6 +588,7 @@ impl Context {
                 InterfaceMessage::ClosingStream { name } => {
                     let _ = connection.close_stream(name).await;
                 }
+                _ => todo!()
             }
         }
     }
@@ -634,6 +637,7 @@ impl Context {
         futs.push(Self::event_future(FutureGenericArgs::AcceptIncoming(ctx.clone())));
         while let Some(maybe_evt) = futs.next().await {
             if let Some(evt) = maybe_evt {
+                let _ = ctx.parent_channel.send(evt.clone()).await;
                 match evt {
                     ContextEvent::AcceptedConnection(id) => {
                         listening.insert(id.clone());

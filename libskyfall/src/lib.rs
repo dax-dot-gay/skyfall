@@ -17,5 +17,7 @@ pub use channel::Channel;
 mod client;
 pub use client::{Client, Profile, KnownPeer, ClientState};
 
+pub mod handlers;
+
 pub(crate) use error::{Error, Result};
 pub use error::{Error as SkyfallError, Result as SkyfallResult};
