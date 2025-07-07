@@ -1,7 +1,7 @@
 mod error;
 
 pub mod identity;
-pub use identity::{Identity, Profile, PublicIdentity};
+pub use identity::{Identity, PublicIdentity};
 
 pub mod context;
 pub use context::{ALPN, Context, ContextConnection};

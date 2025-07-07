@@ -371,7 +371,7 @@ impl Context {
         let id = peer.id.clone();
 
         let mut address = NodeAddr::new(peer.node.clone());
-        if let Some(relay) = peer.profile.preferred_relay.clone() {
+        if let Some(relay) = peer.relay.clone() {
             address = address.with_relay_url(relay);
         }
 
@@ -420,7 +420,7 @@ impl Context {
         ContextConnection::send(&mut send, self.identity.as_public().encode()?).await?;
         let mut connections = self.connections.write();
         let mut address = NodeAddr::new(peer_data.node.clone());
-        if let Some(relay) = peer_data.profile.preferred_relay.clone() {
+        if let Some(relay) = peer_data.relay.clone() {
             address = address.with_relay_url(relay);
         }
 
@@ -582,12 +582,6 @@ impl Context {
             match message {
                 InterfaceMessage::OpeningStream { id, name } => {
                     let _ = connection.accept_stream(name, id);
-                }
-                InterfaceMessage::ChangingProfile { new_profile } => {
-                    let mut connections = ctx.connections.write();
-                    if let Some(target) = connections.get_mut(&peer.id) {
-                        target.peer.profile = new_profile;
-                    }
                 }
                 InterfaceMessage::ClosingStream { name } => {
                     let _ = connection.close_stream(name).await;

@@ -1,8 +1,6 @@
 use serde::{ Deserialize, Serialize };
 use iroh_quinn_proto::{ Side as IrohSide, Dir as IrohDir };
 
-use crate::Profile;
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Side {
     Client = 0,
@@ -124,8 +122,5 @@ pub enum InterfaceMessage {
     },
     ClosingStream {
         name: String
-    },
-    ChangingProfile {
-        new_profile: Profile
     }
 }

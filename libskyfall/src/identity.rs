@@ -1,7 +1,6 @@
 use aes_gcm::aead::rand_core;
 use bon::Builder;
 use iroh::RelayUrl;
-use names::Generator;
 use oqs::{ kem, sig };
 use rmp_serde::config::BytesMode;
 use serde::{ Deserialize, Serialize };
@@ -10,19 +9,6 @@ use base64::prelude::*;
 
 pub const KEM_ALGO: kem::Algorithm = kem::Algorithm::MlKem768;
 pub const SIG_ALGO: sig::Algorithm = sig::Algorithm::MlDsa65;
-
-#[derive(Serialize, Deserialize, Clone, Debug, Builder, PartialEq, Eq)]
-pub struct Profile {
-    #[builder(default = Generator::default().next().unwrap())]
-    pub display_name: String,
-    pub preferred_relay: Option<RelayUrl>
-}
-
-impl Default for Profile {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, Builder)]
 pub struct Identity {
@@ -35,8 +21,7 @@ pub struct Identity {
     #[builder(default = Identity::generate_sig_keypair())]
     sig_keypair: (sig::PublicKey, sig::SecretKey),
 
-    #[builder(default)]
-    profile: Profile
+    relay: Option<RelayUrl>
 }
 
 impl Identity {
@@ -73,18 +58,6 @@ impl Identity {
         self.sig_keypair.clone()
     }
 
-    pub fn profile(&self) -> Profile {
-        self.profile.clone()
-    }
-
-    pub fn profile_mut(&mut self) -> &mut Profile {
-        &mut self.profile
-    }
-
-    pub fn preferred_relay(&self) -> Option<RelayUrl> {
-        self.profile().preferred_relay
-    }
-
     pub fn id(&self) -> String {
         let mut combined = Vec::new();
         combined.extend(self.iroh_public().as_bytes().to_vec());
@@ -93,13 +66,21 @@ impl Identity {
         BASE64_URL_SAFE.encode(sha2::Sha256::digest(combined))
     }
 
+    pub fn relay(&self) -> Option<RelayUrl> {
+        self.relay.clone()
+    }
+
+    pub fn set_relay(&mut self, relay: Option<RelayUrl>) {
+        self.relay = relay;
+    }
+
     pub fn as_public(&self) -> PublicIdentity {
         PublicIdentity {
             id: self.id(),
-            profile: self.profile(),
             node: self.iroh_public(),
             encryption: self.encryption_keypair().0,
-            signing: self.signing_keypair().0
+            signing: self.signing_keypair().0,
+            relay: self.relay()
         }
     }
 }
@@ -113,10 +94,10 @@ impl Default for Identity {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PublicIdentity {
     pub id: String,
-    pub profile: Profile,
     pub node: iroh::NodeId,
     pub encryption: kem::PublicKey,
-    pub signing: sig::PublicKey
+    pub signing: sig::PublicKey,
+    pub relay: Option<RelayUrl>
 }
 
 impl PublicIdentity {
