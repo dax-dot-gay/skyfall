@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+
+use iroh::{RelayMap, RelayMode as IrohRelayMode, RelayUrl};
 use serde::{ Deserialize, Serialize };
 use iroh_quinn_proto::{ Side as IrohSide, Dir as IrohDir };
 
@@ -122,5 +125,42 @@ pub enum InterfaceMessage {
     },
     ClosingStream {
         name: String
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub enum RelayMode {
+    #[default]
+    Default,
+    Disabled,
+    Staging,
+    Custom(HashSet<RelayUrl>)
+}
+
+impl FromIterator<RelayUrl> for RelayMode {
+    fn from_iter<T: IntoIterator<Item = RelayUrl>>(iter: T) -> Self {
+        Self::Custom(iter.into_iter().collect())
+    }
+}
+
+impl Into<IrohRelayMode> for RelayMode {
+    fn into(self) -> IrohRelayMode {
+        match self {
+            RelayMode::Default => IrohRelayMode::Default,
+            RelayMode::Disabled => IrohRelayMode::Disabled,
+            RelayMode::Staging => IrohRelayMode::Staging,
+            RelayMode::Custom(relay_map) => IrohRelayMode::Custom(RelayMap::from_iter(relay_map)),
+        }
+    }
+}
+
+impl From<IrohRelayMode> for RelayMode {
+    fn from(value: IrohRelayMode) -> Self {
+        match value {
+            IrohRelayMode::Disabled => Self::Disabled,
+            IrohRelayMode::Default => Self::Default,
+            IrohRelayMode::Staging => Self::Staging,
+            IrohRelayMode::Custom(relay_map) => Self::Custom(relay_map.urls().cloned().collect()),
+        }
     }
 }

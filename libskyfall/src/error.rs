@@ -21,6 +21,9 @@ pub enum IrohError {
 
     #[error(transparent)]
     ReadExact(#[from] iroh::endpoint::ReadExactError),
+
+    #[error(transparent)]
+    Bind(#[from] iroh::endpoint::BindError)
 }
 
 #[derive(thiserror::Error, Debug, Serialize, Deserialize, PartialEq, Eq)]
