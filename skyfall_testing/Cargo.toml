@@ -8,3 +8,4 @@ libskyfall = {workspace = true}
 tokio = {workspace = true, features = ["full"]}
 iroh = { workspace = true, features = ["discovery-local-network", "discovery-pkarr-dht"] }
 names = {workspace = true}
+base16ct = { workspace = true, features = ["alloc", "std"] }

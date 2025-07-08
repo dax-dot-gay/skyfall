@@ -5455,6 +5455,7 @@ dependencies = [
 name = "skyfall_testing"
 version = "0.1.0"
 dependencies = [
+ "base16ct",
  "iroh",
  "libskyfall",
  "names",
