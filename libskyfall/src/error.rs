@@ -61,6 +61,9 @@ pub enum Error {
     #[error("MsgPack decoding error: {0:?}")]
     MsgpackDecoding(#[from] rmp_serde::decode::Error),
 
+    #[error("JSON error: {0:?}")]
+    Json(#[from] serde_json::Error),
+
     #[error("AES cryptography error: {0:?}")]
     Aes(#[from] aes_gcm::Error),
 
@@ -85,8 +88,8 @@ pub enum Error {
     #[error("Stream already exists.")]
     StreamExists,
 
-    #[error("Stream ID mismatch.")]
-    StreamIdMismatch,
+    #[error("Stream failed initialization checks.")]
+    StreamInitFailure,
 
     #[error("Unknown profile: {0:?}")]
     UnknownProfile(Uuid),

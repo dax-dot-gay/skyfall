@@ -236,8 +236,15 @@ impl ContextConnection {
         if streams.contains_key(&name) {
             return Err(crate::Error::StreamExists);
         }
-        let (mut send, recv) = self.open_bi().await?;
+        let (mut send, mut recv) = self.open_bi().await?;
+        println!("SENDING STREAM NAME");
         Self::send(&mut send, name.as_bytes().to_vec()).await?;
+        println!("WAITING FOR MAGIC NUMBER REPLY");
+        (match recv.read_u16().await {
+            Ok(MAGIC) => Ok(()),
+            Ok(_) => Err(crate::Error::StreamInitFailure),
+            Err(e) => Err(crate::Error::from(e)),
+        })?;
         let id = StreamId::from(send.id());
         let _ = streams.insert(name, (
             id.clone(),
@@ -248,8 +255,11 @@ impl ContextConnection {
     }
 
     pub(crate) async fn accept_stream(&self) -> crate::Result<(String, StreamId)> {
-        let (send, mut recv) = self.accept_bi().await?;
+        let (mut send, mut recv) = self.accept_bi().await?;
         let name = String::from_utf8(Self::recv(&mut recv).await?)?;
+        println!("GOT STREAM NAME");
+        send.write_u16(MAGIC).await?;
+        println!("SENT MAGIC");
         let stream_id = StreamId::from(send.id());
         let mut streams = self.streams.write().await;
 
@@ -644,11 +654,16 @@ impl Context {
                     ContextEvent::AcceptedConnection(id) => {
                         listening.insert(id.clone());
                         futs.push(
-                            Self::event_future(FutureGenericArgs::MessageListener(id, ctx.clone()))
+                            Self::event_future(FutureGenericArgs::MessageListener(id.clone(), ctx.clone()))
                         );
                         futs.push(
                             Self::event_future(FutureGenericArgs::AcceptIncoming(ctx.clone()))
                         );
+                        futs.push(
+                                Self::event_future(
+                                    FutureGenericArgs::AcceptStreams(ctx.clone(), id)
+                                )
+                            );
                     }
                     ContextEvent::OpenedConnection(id) => {
                         listening.insert(id.clone());
@@ -656,8 +671,13 @@ impl Context {
                             Self::event_future(FutureGenericArgs::EventListener(events.clone()))
                         );
                         futs.push(
-                            Self::event_future(FutureGenericArgs::MessageListener(id, ctx.clone()))
+                            Self::event_future(FutureGenericArgs::MessageListener(id.clone(), ctx.clone()))
                         );
+                        futs.push(
+                                Self::event_future(
+                                    FutureGenericArgs::AcceptStreams(ctx.clone(), id)
+                                )
+                            );
                     }
                     ContextEvent::ClosedConnection(id) => {
                         listening.remove(&id);
@@ -695,10 +715,7 @@ impl Context {
                         if listening.contains(&peer) {
                             futs.push(
                                 Self::event_future(
-                                    FutureGenericArgs::AcceptStreams(
-                                        ctx.clone(),
-                                        peer
-                                    )
+                                    FutureGenericArgs::AcceptStreams(ctx.clone(), peer)
                                 )
                             );
                         }
@@ -707,10 +724,7 @@ impl Context {
                         if listening.contains(&peer) {
                             futs.push(
                                 Self::event_future(
-                                    FutureGenericArgs::MessageListener(
-                                        peer,
-                                        ctx.clone()
-                                    )
+                                    FutureGenericArgs::MessageListener(peer, ctx.clone())
                                 )
                             );
                         }
@@ -724,10 +738,7 @@ impl Context {
                         if listening.contains(&peer) {
                             futs.push(
                                 Self::event_future(
-                                    FutureGenericArgs::AcceptStreams(
-                                        ctx.clone(),
-                                        peer
-                                    )
+                                    FutureGenericArgs::AcceptStreams(ctx.clone(), peer)
                                 )
                             );
                         }

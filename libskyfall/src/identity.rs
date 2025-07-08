@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use aes_gcm::aead::rand_core;
 use bon::Builder;
 use iroh::RelayUrl;
@@ -23,7 +25,7 @@ pub struct Identity {
     #[builder(default = Identity::generate_sig_keypair())]
     sig_keypair: (sig::PublicKey, sig::SecretKey),
 
-    relay: Option<RelayUrl>
+    relay: Option<RelayUrl>,
 }
 
 impl Identity {
@@ -82,7 +84,7 @@ impl Identity {
             node: self.iroh_public(),
             encryption: self.encryption_keypair().0,
             signing: self.signing_keypair().0,
-            relay: self.relay()
+            relay: self.relay(),
         }
     }
 }
@@ -99,13 +101,13 @@ impl AsPeerId for Identity {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PublicIdentity {
     pub id: String,
     pub node: iroh::NodeId,
     pub encryption: kem::PublicKey,
     pub signing: sig::PublicKey,
-    pub relay: Option<RelayUrl>
+    pub relay: Option<RelayUrl>,
 }
 
 impl PublicIdentity {
@@ -126,5 +128,17 @@ impl PublicIdentity {
 impl AsPeerId for PublicIdentity {
     fn as_peer_id(&self) -> String {
         self.id.clone()
+    }
+}
+
+impl Debug for PublicIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PublicIdentity")
+            .field("id", &self.id)
+            .field("node", &self.node)
+            .field("encryption", &"oqs::kem::PublicKey(...)")
+            .field("signing", &"oqs::sig::PublicKey(...)")
+            .field("relay", &self.relay)
+            .finish()
     }
 }

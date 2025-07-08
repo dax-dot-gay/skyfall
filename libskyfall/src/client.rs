@@ -4,14 +4,15 @@ use bon::Builder;
 use enum_common_fields::EnumCommonFields;
 use iroh::Endpoint;
 use parking_lot::RwLock;
-use serde::{ Deserialize, Serialize };
+use serde::{ de::DeserializeOwned, Deserialize, Serialize };
 use serde_json::Value;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use crate::{
     context::ContextEvent,
     handlers::{ Command, Handler, Route },
-    utils::{ AsPeerId, RelayMode, Router },
+    utils::{ AsPeerId, InterfaceMessage, RelayMode, Router },
+    Channel,
     Context,
     Identity,
     PublicIdentity,
@@ -428,6 +429,18 @@ impl Client {
         self.state.write().known_peers.remove(&id.as_peer_id()).is_some()
     }
 
+    pub async fn connect_to(&self, peer: impl Into<Peer>) -> crate::Result<Peer> {
+        let peer: Peer = peer.into();
+        let peer = self.peer(peer.id()).unwrap_or(peer.clone());
+        if self.is_connected(peer.clone()) {
+            return Ok(peer);
+        }
+
+        self.context.connect(&peer.identity()).await?;
+        self.insert_peer(peer.clone());
+        Ok(peer)
+    }
+
     pub fn set_peer_info(
         &self,
         id: impl AsPeerId,
@@ -444,6 +457,15 @@ impl Client {
             Ok(peer)
         } else {
             Err(crate::Error::unknown_peer(id))
+        }
+    }
+
+    pub fn peer_info(&self) -> PeerInfo {
+        PeerInfo {
+            identity: self.identity().as_public(),
+            active_profile: self.active_profile().and_then(|p| Some(p.id)),
+            profiles: self.profiles(),
+            routes: self.routes.clone(),
         }
     }
 
@@ -638,5 +660,50 @@ impl Client {
                 }
             })()
         );
+    }
+}
+
+impl Client {
+    pub async fn send_command<Data: Serialize + DeserializeOwned>(
+        &self,
+        peer: impl AsPeerId,
+        path: impl AsRef<str>,
+        data: Option<Data>,
+        create_channel: bool
+    ) -> crate::Result<(Uuid, Option<Channel>)> {
+        let peer = peer.as_peer_id();
+        if let Some(peer) = self.peer(peer.clone()) {
+            if self.is_connected(peer.clone()) {
+                let id = Uuid::new_v4();
+                let path = path.as_ref().to_string();
+                let data = if let Some(d) = data { Some(serde_json::to_value(d)?) } else { None };
+
+                let channel = if create_channel {
+                    Some(
+                        self.context.open_channel(
+                            &peer.identity(),
+                            format!("com:{}", id.to_string())
+                        ).await?
+                    )
+                } else {
+                    None
+                };
+
+                self.context.send_message_to_peer(
+                    peer.id(),
+                    InterfaceMessage::Command(Command {
+                        id: id.clone(),
+                        path,
+                        data,
+                        stream: channel.clone().and_then(|c| Some((c.name(), c.id()))),
+                    })
+                ).await?;
+                Ok((id, channel))
+            } else {
+                Err(crate::Error::disconnected_peer(peer))
+            }
+        } else {
+            Err(crate::Error::unknown_peer(peer))
+        }
     }
 }
