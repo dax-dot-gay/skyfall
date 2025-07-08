@@ -7,7 +7,6 @@ use oqs::{ kem, sig };
 use rmp_serde::config::BytesMode;
 use serde::{ Deserialize, Serialize };
 use sha2::Digest;
-use base64::prelude::*;
 
 use crate::utils::AsPeerId;
 
@@ -26,6 +25,15 @@ pub struct Identity {
     sig_keypair: (sig::PublicKey, sig::SecretKey),
 
     relay: Option<RelayUrl>,
+
+    #[builder(
+        default = names::Generator::default().next().unwrap(),
+        with = |username: impl Into<String>| {
+            let username: String = username.into();
+            username[..176].to_string()
+        }
+    )]
+    username: String,
 }
 
 impl Identity {
@@ -67,7 +75,7 @@ impl Identity {
         combined.extend(self.iroh_public().as_bytes().to_vec());
         combined.extend(self.encryption_keypair().0.into_vec());
         combined.extend(self.signing_keypair().0.into_vec());
-        BASE64_URL_SAFE.encode(sha2::Sha256::digest(combined))
+        base16ct::lower::encode_string(&sha2::Sha256::digest(combined))
     }
 
     pub fn relay(&self) -> Option<RelayUrl> {
@@ -81,11 +89,24 @@ impl Identity {
     pub fn as_public(&self) -> PublicIdentity {
         PublicIdentity {
             id: self.id(),
+            identifier: self.identifier(),
             node: self.iroh_public(),
             encryption: self.encryption_keypair().0,
             signing: self.signing_keypair().0,
             relay: self.relay(),
         }
+    }
+
+    pub fn username(&self) -> String {
+        self.username.clone()
+    }
+
+    pub fn discriminator(&self) -> String {
+        self.id()[..4].to_string().to_lowercase()
+    }
+
+    pub fn identifier(&self) -> String {
+        format!("{}#{}", self.username(), self.discriminator())
     }
 }
 
@@ -104,6 +125,7 @@ impl AsPeerId for Identity {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PublicIdentity {
     pub id: String,
+    pub identifier: String,
     pub node: iroh::NodeId,
     pub encryption: kem::PublicKey,
     pub signing: sig::PublicKey,
@@ -135,6 +157,7 @@ impl Debug for PublicIdentity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PublicIdentity")
             .field("id", &self.id)
+            .field("identifier", &self.identifier)
             .field("node", &self.node)
             .field("encryption", &"oqs::kem::PublicKey(...)")
             .field("signing", &"oqs::sig::PublicKey(...)")

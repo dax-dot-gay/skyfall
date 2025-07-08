@@ -3041,6 +3041,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "async-trait",
+ "base16ct",
  "base64 0.22.1",
  "bon",
  "chrono",

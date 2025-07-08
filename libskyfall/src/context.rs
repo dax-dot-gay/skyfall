@@ -237,9 +237,9 @@ impl ContextConnection {
             return Err(crate::Error::StreamExists);
         }
         let (mut send, mut recv) = self.open_bi().await?;
-        println!("SENDING STREAM NAME");
+        //println!("SENDING STREAM NAME");
         Self::send(&mut send, name.as_bytes().to_vec()).await?;
-        println!("WAITING FOR MAGIC NUMBER REPLY");
+        //println!("WAITING FOR MAGIC NUMBER REPLY");
         (match recv.read_u16().await {
             Ok(MAGIC) => Ok(()),
             Ok(_) => Err(crate::Error::StreamInitFailure),
@@ -257,9 +257,9 @@ impl ContextConnection {
     pub(crate) async fn accept_stream(&self) -> crate::Result<(String, StreamId)> {
         let (mut send, mut recv) = self.accept_bi().await?;
         let name = String::from_utf8(Self::recv(&mut recv).await?)?;
-        println!("GOT STREAM NAME");
+        //println!("GOT STREAM NAME");
         send.write_u16(MAGIC).await?;
-        println!("SENT MAGIC");
+        //println!("SENT MAGIC");
         let stream_id = StreamId::from(send.id());
         let mut streams = self.streams.write().await;
 

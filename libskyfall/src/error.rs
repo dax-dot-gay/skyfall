@@ -26,7 +26,10 @@ pub enum IrohError {
     ReadExact(#[from] iroh::endpoint::ReadExactError),
 
     #[error(transparent)]
-    Bind(#[from] iroh::endpoint::BindError)
+    Bind(#[from] iroh::endpoint::BindError),
+
+    #[error(transparent)]
+    MaxNameLengthExceeded(#[from] iroh::node_info::MaxLengthExceededError)
 }
 
 #[derive(thiserror::Error, Debug, Serialize, Deserialize, PartialEq, Eq)]
