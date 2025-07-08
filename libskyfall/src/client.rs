@@ -304,14 +304,19 @@ impl Client {
 
         self.initialized = true;
         let cloned_ctx = self.context.clone();
+        let cloned_self = self.clone();
         let _ = futures::future::join_all(
             self
                 .peers()
                 .iter()
                 .map(move |peer| {
                     let ctx = cloned_ctx.clone();
+                    let this = cloned_self.clone();
                     async move {
                         let _ = ctx.connect(peer.identity()).await;
+                        if peer.trusted() {
+                            let _ = this.share_info(peer.clone()).await;
+                        }
                     }
                 })
         ).await;
