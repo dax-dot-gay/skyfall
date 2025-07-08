@@ -3040,6 +3040,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "async-channel",
+ "async-trait",
  "base64 0.22.1",
  "bon",
  "chrono",

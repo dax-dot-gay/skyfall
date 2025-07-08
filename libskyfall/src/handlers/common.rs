@@ -5,14 +5,14 @@ use serde::{ Deserialize, Serialize };
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{ utils::StreamId, Channel, Client };
+use crate::{ utils::StreamId, Channel, Client, Peer };
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Message {
-    id: Uuid,
-    path: String,
-    data: Option<Value>,
-    stream: Option<(String, StreamId)>,
+pub struct Command {
+    pub id: Uuid,
+    pub path: String,
+    pub data: Option<Value>,
+    pub stream: Option<(String, StreamId)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Builder)]
@@ -44,14 +44,19 @@ impl Route {
     }
 }
 
+#[async_trait::async_trait]
 pub trait Handler {
     fn id(&self) -> String;
     fn get_routes(&self) -> HashMap<String, Route>;
-    fn on_message(
+    async fn on_message(
         &mut self,
+        selector: String,
+        path: String,
         client: Client,
+        peer: Peer,
         route: Route,
         id: Uuid,
+        captured_segments: Vec<(String, String)>,
         data: Option<Value>,
         stream: Option<Channel>
     ) -> anyhow::Result<()>;

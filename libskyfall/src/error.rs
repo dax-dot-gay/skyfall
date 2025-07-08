@@ -1,3 +1,5 @@
+use std::string::FromUtf8Error;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -92,6 +94,12 @@ pub enum Error {
     #[error("Unknown peer: {0}")]
     UnknownPeer(String),
 
+    #[error("Not connected: {0}")]
+    DisconnectedPeer(String),
+
+    #[error("UTF8 parsing failure: {0:?}")]
+    FromUTF8(#[from] FromUtf8Error),
+
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error)
 }
@@ -141,6 +149,10 @@ impl Error {
 
     pub fn unknown_peer(id: impl AsPeerId) -> Self {
         Self::UnknownPeer(id.as_peer_id())
+    }
+
+    pub fn disconnected_peer(id: impl AsPeerId) -> Self {
+        Self::DisconnectedPeer(id.as_peer_id())
     }
 }
 

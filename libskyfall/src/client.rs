@@ -5,11 +5,12 @@ use enum_common_fields::EnumCommonFields;
 use iroh::Endpoint;
 use parking_lot::RwLock;
 use serde::{ Deserialize, Serialize };
+use serde_json::Value;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use crate::{
     context::ContextEvent,
-    handlers::{ Handler, Route },
+    handlers::{ Command, Handler, Route },
     utils::{ AsPeerId, RelayMode, Router },
     Context,
     Identity,
@@ -169,6 +170,13 @@ pub enum ClientEvent {
         profiles: HashMap<Uuid, Profile>,
         routes: HashMap<String, Route>,
     },
+    CommandFailure {
+        reason: String,
+        route: Route,
+        path: String,
+        segments: Vec<(String, String)>,
+        data: Option<Value>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -188,6 +196,8 @@ pub struct Client {
     client_events: (Sender<ClientEvent>, Receiver<ClientEvent>),
     event_loop: Option<Arc<JoinHandle<()>>>,
     handlers: HashMap<String, Arc<RwLock<dyn Handler + 'static + Send + Sync>>>,
+    routes: HashMap<String, Route>,
+    router: Router<String>,
     initialized: bool,
 }
 
@@ -246,6 +256,8 @@ impl Client {
             client_events: async_channel::unbounded(),
             event_loop: None,
             handlers: HashMap::new(),
+            routes: HashMap::new(),
+            router: Router::new(),
             initialized: false,
         })
     }
@@ -270,6 +282,8 @@ impl Client {
             client_events: async_channel::unbounded(),
             event_loop: None,
             handlers: HashMap::new(),
+            routes: HashMap::new(),
+            router: Router::new(),
             initialized: false,
         })
     }
@@ -305,7 +319,19 @@ impl Client {
             panic!("Cannot add a handler to an initialized client.");
         }
 
-        let _ = self.handlers.insert(handler.id(), Arc::new(RwLock::new(handler)));
+        if self.handlers.contains_key(&handler.id()) {
+            panic!("Cannot add the same handler twice!");
+        }
+
+        let new_routes = handler.get_routes();
+        let handler_id = handler.id();
+        let _ = self.handlers.insert(handler_id.clone(), Arc::new(RwLock::new(handler)));
+        for (selector, listener) in new_routes {
+            let select = format!("{handler_id}::{selector}");
+            let _ = self.routes.insert(select.clone(), listener.clone());
+            self.router.add(listener.path, select);
+        }
+
         self
     }
 
@@ -387,6 +413,12 @@ impl Client {
         result
     }
 
+    pub fn is_connected(&self, peer: impl Into<Peer>) -> bool {
+        let peer: Peer = peer.into();
+        let connected = self.context.connected_peers();
+        connected.contains(&peer.identity())
+    }
+
     pub fn insert_peer(&self, peer: impl Into<Peer>) -> bool {
         let peer: Peer = peer.into();
         self.state.write().known_peers.insert(peer.id(), peer).is_some()
@@ -432,6 +464,22 @@ impl Client {
             Ok(Peer::Untrusted(peer.into()))
         } else {
             Err(crate::Error::unknown_peer(id))
+        }
+    }
+
+    pub async fn share_info(&self, peer: impl Into<Peer>) -> crate::Result<()> {
+        let peer: Peer = peer.into();
+        if self.is_connected(peer.clone()) {
+            self.context.send_message_to_peer(
+                peer.id(),
+                crate::utils::InterfaceMessage::IdentifySelf {
+                    profiles: self.profiles(),
+                    active_profile: self.active_profile().and_then(|p| Some(p.id)),
+                    routes: self.routes.clone(),
+                }
+            ).await
+        } else {
+            Err(crate::Error::disconnected_peer(peer))
         }
     }
 }
@@ -502,8 +550,6 @@ impl Client {
                     ContextEvent::ClosedConnection(_) => (),
                     ContextEvent::ReceivedMessage(public_identity, interface_message) =>
                         match interface_message {
-                            crate::utils::InterfaceMessage::OpeningStream { id: _, name: _ } => (),
-                            crate::utils::InterfaceMessage::ClosingStream { name: _ } => (),
                             crate::utils::InterfaceMessage::IdentifySelf {
                                 profiles,
                                 active_profile,
@@ -526,10 +572,71 @@ impl Client {
                                     }).await;
                                 }
                             }
+                            crate::utils::InterfaceMessage::Command(command) => {
+                                Self::_handle_command(self.clone(), command, public_identity);
+                            }
                         }
-                    ContextEvent::RecvFailure => (),
+                    _ => (),
                 }
             }
         }
+    }
+
+    fn _handle_command(client: Client, command: Command, public_identity: PublicIdentity) {
+        tokio::spawn(
+            (move || async move {
+                if let Some(Peer::Trusted(peer_info)) = client.peer(public_identity) {
+                    if let Some((selectors, captured)) = client.router.find(command.path.clone()) {
+                        for s in selectors {
+                            if let Some(route) = client.routes.get(&s) {
+                                let (handler, selector) = s.split_once("::").unwrap();
+                                if
+                                    let Some(handler_arc) = client.handlers.get(
+                                        &handler.to_string()
+                                    )
+                                {
+                                    let mut handler = handler_arc.write();
+                                    let stream = if let Some((name, _)) = command.stream.clone() {
+                                        if
+                                            let Ok(_stream) = client.context.get_channel(
+                                                &peer_info.identity,
+                                                name
+                                            ).await
+                                        {
+                                            Some(_stream)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    if
+                                        let Err(e) = handler.on_message(
+                                            selector.to_string(),
+                                            command.path.clone(),
+                                            client.clone(),
+                                            Peer::Trusted(peer_info.clone()),
+                                            route.clone(),
+                                            command.id.clone(),
+                                            captured.clone(),
+                                            command.data.clone(),
+                                            stream
+                                        ).await
+                                    {
+                                        client.client_event(ClientEvent::CommandFailure {
+                                            reason: e.to_string(),
+                                            route: route.clone(),
+                                            path: command.path.clone(),
+                                            segments: captured.clone(),
+                                            data: command.data.clone(),
+                                        }).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })()
+        );
     }
 }

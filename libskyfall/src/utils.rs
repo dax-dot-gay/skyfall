@@ -1,11 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use iroh::{RelayMap, RelayMode as IrohRelayMode, RelayUrl};
 use serde::{ Deserialize, Serialize };
 use iroh_quinn_proto::{ Side as IrohSide, Dir as IrohDir };
 use uuid::Uuid;
 
-use crate::{handlers::Route, Profile};
+use crate::{handlers::{Command, Route}, Profile};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Side {
@@ -122,18 +122,12 @@ impl Eq for StreamId {}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum InterfaceMessage {
-    OpeningStream {
-        id: StreamId,
-        name: String
-    },
-    ClosingStream {
-        name: String
-    },
     IdentifySelf {
         profiles: HashMap<Uuid, Profile>,
         active_profile: Option<Uuid>,
         routes: HashMap<String, Route>
-    }
+    },
+    Command(Command)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -174,13 +168,13 @@ impl From<IrohRelayMode> for RelayMode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Router<T> {
+pub struct Router<T: Eq + Hash + Clone> {
     label: String,
-    value: Option<(T, Vec<String>)>,
+    value: Option<(HashSet<T>, Vec<String>)>,
     branches: Vec<Router<T>>
 }
 
-impl<T> Router<T> {
+impl<T: Eq + Hash + Clone> Router<T> {
     /// Constructs a new routing Router.
     pub fn new() -> Router<T> {
         Router {
@@ -207,10 +201,12 @@ impl<T> Router<T> {
         mut capture_labels: Vec<String>) {
         match segments.next() {
             None => {
-                if self.value.is_some() {
-                    panic!("Duplicate route!");
-                }
-                self.value = Some((value, capture_labels))
+                self.value = if let Some(mut current) = self.value.clone() {
+                    current.0.insert(value);
+                    Some(current)
+                } else {
+                    Some((HashSet::from_iter(vec![value]), capture_labels))
+                };
             },
             Some(segment) => {
                 if let Some(existing_branch) =
@@ -248,7 +244,7 @@ impl<T> Router<T> {
     pub fn find(
         &self,
         key: impl AsRef<str>
-        ) -> Option<(&T, Vec<(String, String)>)> {
+        ) -> Option<(HashSet<T>, Vec<(String, String)>)> {
         let key = key.as_ref().to_string();
         let segments: Vec<String> = key.split('/')
             .filter_map(|s| if s.is_empty() {None} else {Some(s.to_string())})
@@ -256,14 +252,14 @@ impl<T> Router<T> {
         let mut captured = Vec::new();  // Will be filled while iterating
         self.find_(segments, &mut captured)
             .map(|&(ref v, ref labels)| {
-                (v, labels.iter().cloned().zip(captured).collect())
+                (v.clone(), labels.iter().cloned().zip(captured).collect())
             })
     }
     fn find_(
         &self,
         segments: Vec<String>,
         captured: &mut Vec<String>
-        ) -> Option<&(T, Vec<String>)> {
+        ) -> Option<&(HashSet<T>, Vec<String>)> {
         match segments.split_first() {
             None => self.value.as_ref(),
             Some((segment, remaining)) => self.branches.iter().filter_map(|t| {

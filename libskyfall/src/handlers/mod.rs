@@ -1,2 +1,2 @@
 mod common;
-pub use common::{Handler, Message, Route};
+pub use common::{Handler, Command, Route};

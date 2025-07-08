@@ -236,7 +236,8 @@ impl ContextConnection {
         if streams.contains_key(&name) {
             return Err(crate::Error::StreamExists);
         }
-        let (send, recv) = self.open_bi().await?;
+        let (mut send, recv) = self.open_bi().await?;
+        Self::send(&mut send, name.as_bytes().to_vec()).await?;
         let id = StreamId::from(send.id());
         let _ = streams.insert(name, (
             id.clone(),
@@ -246,25 +247,18 @@ impl ContextConnection {
         Ok(id)
     }
 
-    pub(crate) async fn accept_stream(&self, name: String, id: StreamId) -> crate::Result<()> {
-        let mut streams = self.streams.write().await;
-        if streams.contains_key(&name) {
-            return Err(crate::Error::StreamExists);
-        }
-        let (mut send, mut recv) = self.accept_bi().await?;
+    pub(crate) async fn accept_stream(&self) -> crate::Result<(String, StreamId)> {
+        let (send, mut recv) = self.accept_bi().await?;
+        let name = String::from_utf8(Self::recv(&mut recv).await?)?;
         let stream_id = StreamId::from(send.id());
-        if stream_id != id {
-            let _ = send.finish();
-            let _ = recv.stop((1 as u16).into());
-            return Err(crate::Error::StreamIdMismatch);
-        }
+        let mut streams = self.streams.write().await;
 
-        let _ = streams.insert(name, (
-            id.clone(),
+        let _ = streams.insert(name.clone(), (
+            stream_id.clone(),
             Arc::new(AsyncMutex::new(send)),
             Arc::new(AsyncMutex::new(recv)),
         ));
-        Ok(())
+        Ok((name, stream_id))
     }
 
     pub(crate) async fn get_stream_id(&self, name: impl AsRef<str>) -> crate::Result<StreamId> {
@@ -309,8 +303,12 @@ pub enum ContextEvent {
     AcceptedConnection(String),
     OpenedConnection(String),
     ClosedConnection(String),
+    AcceptedStream(String, String, StreamId),
     ReceivedMessage(PublicIdentity, InterfaceMessage),
     RecvFailure,
+    MessageFailure(String),
+    ConnectorFailure,
+    StreamFailure(String),
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +317,7 @@ enum FutureGenericArgs {
     MessageListener(String, Context),
     HandlerReply(Context, InterfaceMessage, PublicIdentity),
     AcceptIncoming(Context),
+    AcceptStreams(Context, String),
 }
 
 #[derive(Clone)]
@@ -330,7 +329,7 @@ pub struct Context {
     connections: Arc<RwLock<HashMap<String, ContextConnection>>>,
     event_loop: Option<Arc<JoinHandle<()>>>,
     event_channel: Sender<ContextEvent>,
-    parent_channel: Sender<ContextEvent>
+    parent_channel: Sender<ContextEvent>,
 }
 
 impl Debug for Context {
@@ -345,7 +344,11 @@ impl Debug for Context {
 }
 
 impl Context {
-    pub fn new(identity: Identity, endpoint: Endpoint, parent_channel: Sender<ContextEvent>) -> crate::Result<Self> {
+    pub fn new(
+        identity: Identity,
+        endpoint: Endpoint,
+        parent_channel: Sender<ContextEvent>
+    ) -> crate::Result<Self> {
         oqs::init();
 
         let (tx, rx) = async_channel::unbounded::<ContextEvent>();
@@ -358,7 +361,7 @@ impl Context {
             connections: Arc::new(RwLock::new(HashMap::new())),
             event_loop: None,
             event_channel: tx,
-            parent_channel
+            parent_channel,
         };
 
         instance.event_loop = Some(Arc::new(tokio::spawn(Self::event_loop(instance.clone(), rx))));
@@ -538,10 +541,6 @@ impl Context {
         let name = name.as_ref().to_string();
         let connection = self.connection(peer.id.clone())?;
         let created_id = connection.open_stream(name.clone()).await?;
-        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::OpeningStream {
-            id: created_id.clone(),
-            name: name.clone(),
-        }).await?;
         Ok(Channel::new(name.clone(), created_id.clone(), connection))
     }
 
@@ -553,9 +552,6 @@ impl Context {
         let name = name.as_ref().to_string();
         let connection = self.connection(peer.id.clone())?;
         connection.close_stream(name.clone()).await?;
-        self.send_message_to_peer(connection.peer.id.clone(), InterfaceMessage::ClosingStream {
-            name: name.clone(),
-        }).await?;
         Ok(())
     }
 
@@ -580,15 +576,9 @@ impl Context {
 // Event-loop related functions
 impl Context {
     async fn _handle_message(ctx: Context, message: InterfaceMessage, peer: PublicIdentity) -> () {
-        if let Ok(connection) = ctx.connection(peer.id.clone()) {
+        if let Ok(_connection) = ctx.connection(peer.id.clone()) {
             match message {
-                InterfaceMessage::OpeningStream { id, name } => {
-                    let _ = connection.accept_stream(name, id);
-                }
-                InterfaceMessage::ClosingStream { name } => {
-                    let _ = connection.close_stream(name).await;
-                }
-                _ => todo!()
+                _ => (),
             }
         }
     }
@@ -598,10 +588,10 @@ impl Context {
     }
 
     async fn _get_next_message_from_peer(ctx: Context, id: String) -> Option<ContextEvent> {
-        if let Ok((peer, message)) = ctx.recv_message_from_peer(id).await {
+        if let Ok((peer, message)) = ctx.recv_message_from_peer(id.clone()).await {
             Some(ContextEvent::ReceivedMessage(peer, message))
         } else {
-            None
+            Some(ContextEvent::MessageFailure(id))
         }
     }
 
@@ -611,9 +601,19 @@ impl Context {
             Ok(Some(peer)) => Some(ContextEvent::AcceptedConnection(peer)),
             _ => {
                 //println!("ACCEPT_FAIL: {other:?}");
-                None
+                Some(ContextEvent::ConnectorFailure)
             }
         }
+    }
+
+    async fn _accept_incoming_streams(ctx: Context, peer: String) -> Option<ContextEvent> {
+        if let Ok(connection) = ctx.connection(peer.clone()) {
+            if let Ok((name, stream_id)) = connection.accept_stream().await {
+                return Some(ContextEvent::AcceptedStream(peer, name, stream_id));
+            }
+        }
+
+        Some(ContextEvent::StreamFailure(peer))
     }
 
     async fn event_future(mode: FutureGenericArgs) -> Option<ContextEvent> {
@@ -627,6 +627,8 @@ impl Context {
             }
             FutureGenericArgs::AcceptIncoming(context) =>
                 Self::_accept_incoming_connections(context).await,
+            FutureGenericArgs::AcceptStreams(context, id) =>
+                Self::_accept_incoming_streams(context, id).await,
         }
     }
 
@@ -688,6 +690,47 @@ impl Context {
                         futs.push(
                             Self::event_future(FutureGenericArgs::EventListener(events.clone()))
                         );
+                    }
+                    ContextEvent::AcceptedStream(peer, ..) => {
+                        if listening.contains(&peer) {
+                            futs.push(
+                                Self::event_future(
+                                    FutureGenericArgs::AcceptStreams(
+                                        ctx.clone(),
+                                        peer
+                                    )
+                                )
+                            );
+                        }
+                    }
+                    ContextEvent::MessageFailure(peer) => {
+                        if listening.contains(&peer) {
+                            futs.push(
+                                Self::event_future(
+                                    FutureGenericArgs::MessageListener(
+                                        peer,
+                                        ctx.clone()
+                                    )
+                                )
+                            );
+                        }
+                    }
+                    ContextEvent::ConnectorFailure => {
+                        futs.push(
+                            Self::event_future(FutureGenericArgs::EventListener(events.clone()))
+                        );
+                    }
+                    ContextEvent::StreamFailure(peer) => {
+                        if listening.contains(&peer) {
+                            futs.push(
+                                Self::event_future(
+                                    FutureGenericArgs::AcceptStreams(
+                                        ctx.clone(),
+                                        peer
+                                    )
+                                )
+                            );
+                        }
                     }
                 }
             }
