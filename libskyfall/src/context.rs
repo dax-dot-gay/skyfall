@@ -3,7 +3,7 @@ use std::{ collections::{ HashMap, HashSet }, fmt::Debug, ops::{ Deref, DerefMut
 use aes_gcm::{ aead::{ Aead, AeadCore, OsRng }, Aes256Gcm, Key, KeyInit };
 use async_channel::{ Receiver, Sender };
 use futures::{ stream::FuturesUnordered, StreamExt as _ };
-use iroh::{ endpoint::{ Connection, RecvStream, SendStream }, Endpoint, NodeAddr };
+use iroh::{ endpoint::{ Connection, RecvStream, SendStream }, Endpoint, NodeAddr, NodeId };
 use oqs::{ kem, sig };
 use parking_lot::RwLock;
 use serde::{ Deserialize, Serialize };
@@ -378,17 +378,9 @@ impl Context {
         Ok(instance)
     }
 
-    pub async fn connect(&self, peer: &PublicIdentity) -> crate::Result<String> {
-        let mut connections = self.connections.write();
-        if connections.contains_key(&peer.id) {
-            return Err(crate::Error::existing_connection(peer));
-        }
-        let id = peer.id.clone();
-
-        let mut address = NodeAddr::new(peer.node.clone());
-        if let Some(relay) = peer.relay.clone() {
-            address = address.with_relay_url(relay);
-        }
+    pub async fn connect(&self, peer: impl Into<NodeId>) -> crate::Result<String> {
+        let peer: NodeId = peer.into();
+        let address = NodeAddr::new(peer.clone());
 
         //println!("Waiting for connection...");
         let connection = self.endpoint.connect(address.clone(), ALPN).await?;
@@ -399,19 +391,24 @@ impl Context {
         ContextConnection::send(&mut send, self.identity.as_public().encode()?).await?;
         //println!("Sent handshake!");
         let peer_data = PublicIdentity::decode(ContextConnection::recv(&mut recv).await?)?;
-        if peer_data != peer.clone() {
-            return Err(crate::Error::PeerIdentityMismatch);
+        
+        let mut connections = self.connections.write();
+        if connections.contains_key(&peer_data.id) {
+            let _ = send.finish();
+            let _ = recv.stop(0u8.into());
+            return Err(crate::Error::existing_connection(&peer_data));
         }
+        let id = peer_data.id.clone();
 
-        let _ = connections.insert(peer.id.clone(), ContextConnection {
+        let _ = connections.insert(peer_data.id.clone(), ContextConnection {
             address,
             connection,
-            peer: peer.clone(),
+            peer: peer_data.clone(),
             interface: (Arc::new(AsyncMutex::new(send)), Arc::new(AsyncMutex::new(recv))),
             streams: Arc::new(AsyncRwLock::new(HashMap::new())),
         });
 
-        self.event_channel.send(ContextEvent::OpenedConnection(peer.id.clone())).await.unwrap();
+        self.event_channel.send(ContextEvent::OpenedConnection(peer_data.id.clone())).await.unwrap();
 
         Ok(id)
     }

@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     sleep(Duration::from_secs(2)).await;
 
-    let sink_peer = source.trust_peer(source.connect_to(sink.peer_info()).await?)?;
+    let sink_peer = source.trust_peer(source.connect_to(sink.peer_info().identity).await?)?;
     source.share_info(sink_peer.clone()).await?;
 
     let channel = source.send_command::<()>(sink_peer.clone(), "ECHO/echo", None, true).await?.1.unwrap();

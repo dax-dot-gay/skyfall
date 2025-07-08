@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use aes_gcm::aead::rand_core;
 use bon::Builder;
-use iroh::RelayUrl;
+use iroh::{NodeId, RelayUrl};
 use oqs::{ kem, sig };
 use rmp_serde::config::BytesMode;
 use serde::{ Deserialize, Serialize };
@@ -163,5 +163,11 @@ impl Debug for PublicIdentity {
             .field("signing", &"oqs::sig::PublicKey(...)")
             .field("relay", &self.relay)
             .finish()
+    }
+}
+
+impl Into<NodeId> for PublicIdentity {
+    fn into(self) -> NodeId {
+        self.node
     }
 }

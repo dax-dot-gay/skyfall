@@ -2,7 +2,7 @@ use std::{ collections::HashMap, fmt::Debug, sync::Arc };
 use async_channel::{ Receiver, Sender };
 use bon::Builder;
 use enum_common_fields::EnumCommonFields;
-use iroh::Endpoint;
+use iroh::{Endpoint, NodeId};
 use parking_lot::RwLock;
 use serde::{ de::DeserializeOwned, Deserialize, Serialize };
 use serde_json::Value;
@@ -158,6 +158,12 @@ impl AsPeerId for Peer {
     }
 }
 
+impl Into<NodeId> for Peer {
+    fn into(self) -> NodeId {
+        self.identity().node
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "snake_case", tag = "event")]
 pub enum ClientEvent {
@@ -305,7 +311,7 @@ impl Client {
                 .map(move |peer| {
                     let ctx = cloned_ctx.clone();
                     async move {
-                        let _ = ctx.connect(&peer.identity()).await;
+                        let _ = ctx.connect(peer.identity()).await;
                     }
                 })
         ).await;
@@ -431,16 +437,13 @@ impl Client {
         self.state.write().known_peers.remove(&id.as_peer_id()).is_some()
     }
 
-    pub async fn connect_to(&self, peer: impl Into<Peer>) -> crate::Result<Peer> {
-        let peer: Peer = peer.into();
-        let peer = self.peer(peer.id()).unwrap_or(peer.clone());
-        if self.is_connected(peer.clone()) {
-            return Ok(peer);
-        }
+    pub async fn connect_to(&self, peer: impl Into<NodeId>) -> crate::Result<Peer> {
+        let peer: NodeId = peer.into();
 
-        self.context.connect(&peer.identity()).await?;
-        self.insert_peer(peer.clone());
-        Ok(peer)
+        let connected_to = self.context.connect(peer).await?;
+        let connected_peer = Peer::from(self.context.connection(connected_to)?.peer());
+        self.insert_peer(connected_peer.clone());
+        Ok(connected_peer)
     }
 
     pub fn set_peer_info(
