@@ -5,7 +5,7 @@ use serde::{ Deserialize, Serialize };
 use iroh_quinn_proto::{ Side as IrohSide, Dir as IrohDir };
 use uuid::Uuid;
 
-use crate::Profile;
+use crate::{handlers::Route, Profile};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Side {
@@ -131,7 +131,8 @@ pub enum InterfaceMessage {
     },
     IdentifySelf {
         profiles: HashMap<Uuid, Profile>,
-        active_profile: Option<Uuid>
+        active_profile: Option<Uuid>,
+        routes: HashMap<String, Route>
     }
 }
 
@@ -172,6 +173,7 @@ impl From<IrohRelayMode> for RelayMode {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Router<T> {
     label: String,
     value: Option<(T, Vec<String>)>,
@@ -279,5 +281,15 @@ impl<T> Router<T> {
                 }
             }).next()
         }
+    }
+}
+
+pub trait AsPeerId {
+    fn as_peer_id(&self) -> String;
+}
+
+impl<T: AsRef<str>> AsPeerId for T {
+    fn as_peer_id(&self) -> String {
+        self.as_ref().to_string()
     }
 }

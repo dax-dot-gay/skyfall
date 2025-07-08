@@ -7,6 +7,8 @@ use serde::{ Deserialize, Serialize };
 use sha2::Digest;
 use base64::prelude::*;
 
+use crate::utils::AsPeerId;
+
 pub const KEM_ALGO: kem::Algorithm = kem::Algorithm::MlKem768;
 pub const SIG_ALGO: sig::Algorithm = sig::Algorithm::MlDsa65;
 
@@ -91,6 +93,12 @@ impl Default for Identity {
     }
 }
 
+impl AsPeerId for Identity {
+    fn as_peer_id(&self) -> String {
+        self.id()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PublicIdentity {
     pub id: String,
@@ -112,5 +120,11 @@ impl PublicIdentity {
 
     pub fn decode(data: Vec<u8>) -> crate::Result<Self> {
         Ok(rmp_serde::decode::from_slice::<Self>(&data)?)
+    }
+}
+
+impl AsPeerId for PublicIdentity {
+    fn as_peer_id(&self) -> String {
+        self.id.clone()
     }
 }

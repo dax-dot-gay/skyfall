@@ -15,7 +15,7 @@ mod channel;
 pub use channel::Channel;
 
 mod client;
-pub use client::{Client, Profile, KnownPeer, ClientState};
+pub use client::{Client, Profile, Peer, PeerInfo, ClientState, ClientEvent};
 
 pub mod handlers;
 

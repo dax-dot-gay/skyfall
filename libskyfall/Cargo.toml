@@ -27,3 +27,4 @@ crc = { workspace = true }
 iroh-quinn-proto = { workspace = true }
 futures = { workspace = true, features = ["compat", "io-compat"] }
 async-channel = { workspace = true }
+enum_common_fields = "0.7.0"

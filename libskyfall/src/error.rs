@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::PublicIdentity;
+use crate::{utils::AsPeerId, PublicIdentity};
 
 #[derive(thiserror::Error, Debug)]
 pub enum IrohError {
@@ -89,6 +89,9 @@ pub enum Error {
     #[error("Unknown profile: {0:?}")]
     UnknownProfile(Uuid),
 
+    #[error("Unknown peer: {0}")]
+    UnknownPeer(String),
+
     #[error(transparent)]
     Unhandled(#[from] anyhow::Error)
 }
@@ -134,6 +137,10 @@ impl Error {
 
     pub fn unknown_profile(id: Uuid) -> Self {
         Self::UnknownProfile(id)
+    }
+
+    pub fn unknown_peer(id: impl AsPeerId) -> Self {
+        Self::UnknownPeer(id.as_peer_id())
     }
 }
 

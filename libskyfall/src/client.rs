@@ -1,6 +1,7 @@
 use std::{ collections::HashMap, fmt::Debug, sync::Arc };
 use async_channel::{ Receiver, Sender };
 use bon::Builder;
+use enum_common_fields::EnumCommonFields;
 use iroh::Endpoint;
 use parking_lot::RwLock;
 use serde::{ Deserialize, Serialize };
@@ -8,8 +9,8 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 use crate::{
     context::ContextEvent,
-    handlers::Handler,
-    utils::RelayMode,
+    handlers::{ Handler, Route },
+    utils::{ AsPeerId, RelayMode, Router },
     Context,
     Identity,
     PublicIdentity,
@@ -41,32 +42,132 @@ impl Profile {
     }
 }
 
+type PeerActiveProfile = Option<Uuid>;
+type PeerProfiles = HashMap<Uuid, Profile>;
+type PeerRoutes = HashMap<String, Route>;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KnownPeer {
+pub struct PeerInfo {
     pub identity: PublicIdentity,
     pub active_profile: Option<Uuid>,
     pub profiles: HashMap<Uuid, Profile>,
+    pub routes: HashMap<String, Route>,
 }
 
-impl KnownPeer {
+impl PeerInfo {
     pub fn id(&self) -> String {
         self.identity.id.clone()
+    }
+}
+
+impl From<PublicIdentity> for PeerInfo {
+    fn from(value: PublicIdentity) -> Self {
+        Self {
+            identity: value,
+            active_profile: None,
+            profiles: HashMap::new(),
+            routes: HashMap::new(),
+        }
+    }
+}
+
+impl From<Peer> for PeerInfo {
+    fn from(value: Peer) -> Self {
+        match value {
+            Peer::Trusted(peer_info) | Peer::Untrusted(peer_info) => peer_info,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, EnumCommonFields)]
+#[common_field(identity as identity_ref: PublicIdentity)]
+#[common_field(mut_only identity as identity_mut: PublicIdentity)]
+#[common_field(active_profile as active_profile_ref: PeerActiveProfile)]
+#[common_field(mut_only active_profile as active_profile_mut: PeerActiveProfile)]
+#[common_field(profiles as profiles_ref: PeerProfiles)]
+#[common_field(mut_only profiles as profiles_mut: PeerProfiles)]
+#[common_field(routes as routes_ref: PeerRoutes)]
+#[common_field(mut_only routes as routes_mut: PeerRoutes)]
+pub enum Peer {
+    Trusted(PeerInfo),
+    Untrusted(PeerInfo),
+}
+
+impl Peer {
+    pub fn id(&self) -> String {
+        match self {
+            Peer::Trusted(trusted_peer) => trusted_peer.id(),
+            Peer::Untrusted(untrusted_peer) => untrusted_peer.id(),
+        }
+    }
+
+    pub fn trusted(&self) -> bool {
+        match self {
+            Self::Trusted(_) => true,
+            Self::Untrusted(_) => false,
+        }
+    }
+
+    pub fn trust(peer: PeerInfo) -> Self {
+        Self::Trusted(peer)
+    }
+
+    pub fn distrust(peer: PeerInfo) -> Self {
+        Self::Untrusted(peer)
+    }
+
+    pub fn identity(&self) -> PublicIdentity {
+        self.identity_ref().clone()
+    }
+
+    pub fn active_profile(&self) -> Option<Uuid> {
+        self.active_profile_ref().clone()
+    }
+
+    pub fn profiles(&self) -> HashMap<Uuid, Profile> {
+        self.profiles_ref().clone()
+    }
+
+    pub fn routes(&self) -> HashMap<String, Route> {
+        self.routes_ref().clone()
+    }
+}
+
+impl From<PeerInfo> for Peer {
+    fn from(value: PeerInfo) -> Self {
+        Self::Trusted(value)
+    }
+}
+
+impl From<PublicIdentity> for Peer {
+    fn from(value: PublicIdentity) -> Self {
+        Self::Untrusted(PeerInfo {
+            identity: value,
+            active_profile: None,
+            profiles: HashMap::new(),
+            routes: HashMap::new(),
+        })
+    }
+}
+
+impl AsPeerId for Peer {
+    fn as_peer_id(&self) -> String {
+        self.id()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "snake_case", tag = "event")]
 pub enum ClientEvent {
-    UnknownConnection {
-        peer: PublicIdentity,
+    Connected {
+        peer: Peer,
     },
-    KnownConnection {
-        peer: PublicIdentity,
-        known: KnownPeer,
-    },
-    PeerIdentified {
-        peer: PublicIdentity,
-        known: KnownPeer,
+    UpdatedPeer {
+        peer: Peer,
+        identity: PublicIdentity,
+        active_profile: Option<Uuid>,
+        profiles: HashMap<Uuid, Profile>,
+        routes: HashMap<String, Route>,
     },
 }
 
@@ -75,7 +176,7 @@ pub struct ClientState {
     pub(self) identity: Identity,
     pub(self) profiles: HashMap<Uuid, Profile>,
     pub(self) active_profile: Option<Uuid>,
-    pub(self) known_peers: HashMap<String, KnownPeer>,
+    pub(self) known_peers: HashMap<String, Peer>,
     pub(self) relay_mode: RelayMode,
 }
 
@@ -114,7 +215,7 @@ impl Client {
     pub async fn new(
         #[builder(field)] active_profile: Option<Uuid>,
         #[builder(field)] profiles: HashMap<Uuid, Profile>,
-        #[builder(field)] known_peers: HashMap<String, KnownPeer>,
+        #[builder(field)] known_peers: HashMap<String, Peer>,
         #[builder(default)] identity: Identity,
         #[builder(default, into)] relay_mode: RelayMode
     ) -> crate::Result<Self> {
@@ -182,12 +283,12 @@ impl Client {
         let cloned_ctx = self.context.clone();
         let _ = futures::future::join_all(
             self
-                .known_peer_ids()
+                .peers()
                 .iter()
                 .map(move |peer| {
                     let ctx = cloned_ctx.clone();
                     async move {
-                        let _ = ctx.connect(&peer).await;
+                        let _ = ctx.connect(&peer.identity()).await;
                     }
                 })
         ).await;
@@ -265,82 +366,73 @@ impl Client {
         }
     }
 
-    pub fn get_peer(&self, identity: PublicIdentity) -> Option<KnownPeer> {
-        self.state.read().known_peers.get(&identity.id).cloned()
+    pub fn peers(&self) -> Vec<Peer> {
+        self.state.read().known_peers.clone().values().cloned().collect()
     }
 
-    pub fn known_peers(&self) -> Vec<KnownPeer> {
-        self.state.read().known_peers.values().cloned().collect()
+    pub fn peer(&self, id: impl AsPeerId) -> Option<Peer> {
+        self.state.read().known_peers.get(&id.as_peer_id()).cloned()
     }
 
-    pub fn known_peer_ids(&self) -> Vec<PublicIdentity> {
-        self.state
-            .read()
-            .known_peers.values()
-            .map(|p| p.identity.clone())
-            .collect()
+    pub fn connected_peers(&self) -> Vec<Peer> {
+        let mut result = Vec::new();
+        let connected = self.context.connected_peers();
+
+        for peer in self.peers() {
+            if connected.contains(&peer.identity()) {
+                result.push(peer);
+            }
+        }
+
+        result
     }
 
-    pub fn connected_peers(&self) -> Vec<PublicIdentity> {
-        self.context.connected_peers()
+    pub fn insert_peer(&self, peer: impl Into<Peer>) -> bool {
+        let peer: Peer = peer.into();
+        self.state.write().known_peers.insert(peer.id(), peer).is_some()
     }
 
-    pub fn known_connected_peers(&self) -> Vec<KnownPeer> {
-        let known_peers: HashMap<String, KnownPeer> = self
-            .known_peers()
-            .iter()
-            .map(|p| (p.identity.id.clone(), p.clone()))
-            .collect();
-        let known_ids: Vec<PublicIdentity> = known_peers
-            .values()
-            .map(|p| p.identity.clone())
-            .collect();
-        let known_connected_ids: Vec<PublicIdentity> = self
-            .connected_peers()
-            .iter()
-            .filter(|p| known_ids.contains(*p))
-            .cloned()
-            .collect();
-
-        known_connected_ids
-            .iter()
-            .map(|i| known_peers.get(&i.id).unwrap().clone())
-            .collect()
+    pub fn remove_peer(&self, id: impl AsPeerId) -> bool {
+        self.state.write().known_peers.remove(&id.as_peer_id()).is_some()
     }
 
-    pub fn unknown_connected_peers(&self) -> Vec<PublicIdentity> {
-        let known_ids: Vec<PublicIdentity> = self
-            .known_peers()
-            .iter()
-            .map(|p| p.identity.clone())
-            .collect();
-        let unknown_connected_ids: Vec<PublicIdentity> = self
-            .connected_peers()
-            .iter()
-            .filter(|p| !known_ids.contains(*p))
-            .cloned()
-            .collect();
-
-        unknown_connected_ids
-    }
-
-    pub fn add_known_peer(
+    pub fn set_peer_info(
         &self,
-        peer: PublicIdentity,
+        id: impl AsPeerId,
         active_profile: Option<Uuid>,
-        profiles: HashMap<Uuid, Profile>
-    ) -> () {
-        let mut state = self.state.write();
-        let _ = state.known_peers.insert(peer.id.clone(), KnownPeer {
-            identity: peer,
-            active_profile,
-            profiles,
-        });
+        profiles: HashMap<Uuid, Profile>,
+        routes: HashMap<String, Route>
+    ) -> crate::Result<Peer> {
+        let id = id.as_peer_id();
+        if let Some(mut peer) = self.peer(id.clone()) {
+            *peer.active_profile_mut() = active_profile;
+            *peer.profiles_mut() = profiles;
+            *peer.routes_mut() = routes;
+            self.insert_peer(peer.clone());
+            Ok(peer)
+        } else {
+            Err(crate::Error::unknown_peer(id))
+        }
     }
 
-    pub fn remove_known_peer(&self, id: impl AsRef<str>) -> () {
-        let mut state = self.state.write();
-        let _ = state.known_peers.remove(&id.as_ref().to_string());
+    pub fn trust_peer(&self, id: impl AsPeerId) -> crate::Result<Peer> {
+        let id = id.as_peer_id();
+        if let Some(peer) = self.peer(id.clone()) {
+            let _ = self.insert_peer(Peer::Trusted(peer.clone().into()));
+            Ok(Peer::Trusted(peer.into()))
+        } else {
+            Err(crate::Error::unknown_peer(id))
+        }
+    }
+
+    pub fn distrust_peer(&self, id: impl AsPeerId) -> crate::Result<Peer> {
+        let id = id.as_peer_id();
+        if let Some(peer) = self.peer(id.clone()) {
+            let _ = self.insert_peer(Peer::Untrusted(peer.clone().into()));
+            Ok(Peer::Untrusted(peer.into()))
+        } else {
+            Err(crate::Error::unknown_peer(id))
+        }
     }
 }
 
@@ -359,17 +451,16 @@ impl<S: State> ClientBuilder<S> {
         self
     }
 
-    pub fn with_known_peer(mut self, peer: KnownPeer) -> Self {
-        let _ = self.known_peers.insert(peer.id(), peer);
+    pub fn with_trusted_peer(mut self, peer: impl Into<PeerInfo>) -> Self {
+        let peer: PeerInfo = peer.into();
+        let _ = self.known_peers.insert(peer.id(), Peer::trust(peer.into()));
         self
     }
 
-    pub fn with_unknown_peer(self, peer: PublicIdentity) -> Self {
-        self.with_known_peer(KnownPeer {
-            identity: peer,
-            active_profile: None,
-            profiles: HashMap::new(),
-        })
+    pub fn with_untrusted_peer(mut self, peer: impl Into<PeerInfo>) -> Self {
+        let peer: PeerInfo = peer.into();
+        let _ = self.known_peers.insert(peer.id(), Peer::distrust(peer.into()));
+        self
     }
 }
 
@@ -388,11 +479,23 @@ impl Client {
             if let Ok(event) = self.context_events.recv().await {
                 match event {
                     ContextEvent::AcceptedConnection(peer_id) => {
-                        let peer = self.context.connection(peer_id).unwrap().peer();
-                        if let Some(known) = self.get_peer(peer.clone()) {
-                            self.client_event(ClientEvent::KnownConnection { peer, known }).await;
-                        } else {
-                            self.client_event(ClientEvent::UnknownConnection { peer }).await;
+                        match self.peer(peer_id.clone()) {
+                            Some(Peer::Trusted(trusted)) =>
+                                self.client_event(ClientEvent::Connected {
+                                    peer: trusted.into(),
+                                }).await,
+                            Some(Peer::Untrusted(untrusted)) =>
+                                self.client_event(ClientEvent::Connected {
+                                    peer: untrusted.into(),
+                                }).await,
+                            None => {
+                                if let Ok(conn) = self.context.connection(peer_id.clone()) {
+                                    self.insert_peer(conn.peer());
+                                    self.client_event(ClientEvent::Connected {
+                                        peer: conn.peer().into(),
+                                    }).await;
+                                }
+                            }
                         }
                     }
                     ContextEvent::OpenedConnection(_) => (),
@@ -404,15 +507,24 @@ impl Client {
                             crate::utils::InterfaceMessage::IdentifySelf {
                                 profiles,
                                 active_profile,
+                                routes,
                             } => {
-                                self.client_event(ClientEvent::PeerIdentified {
-                                    peer: public_identity.clone(),
-                                    known: KnownPeer {
-                                        identity: public_identity.clone(),
+                                if
+                                    let Ok(updated) = self.set_peer_info(
+                                        public_identity,
                                         active_profile,
                                         profiles,
-                                    },
-                                }).await;
+                                        routes
+                                    )
+                                {
+                                    self.client_event(ClientEvent::UpdatedPeer {
+                                        peer: updated.clone(),
+                                        identity: updated.identity(),
+                                        active_profile: updated.active_profile(),
+                                        profiles: updated.profiles(),
+                                        routes: updated.routes(),
+                                    }).await;
+                                }
                             }
                         }
                     ContextEvent::RecvFailure => (),
