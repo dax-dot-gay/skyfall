@@ -1,8 +1,9 @@
+#![allow(dead_code)]
 use std::collections::HashMap;
 
 use darling::FromMeta;
 use proc_macro2::TokenStream;
-use syn::{ Attribute, FnArg, Ident, ImplItemFn, Pat, PatIdent, PatType, Type };
+use syn::{ Attribute, FnArg, Ident, ImplItemFn, Pat, PatIdent, PatType };
 
 #[derive(Clone, Debug, FromMeta)]
 pub struct RouteArgs {
@@ -19,6 +20,9 @@ pub struct RouteArgs {
 
     #[darling(default)]
     pub request: Option<Ident>,
+
+    #[darling(default)]
+    pub about: Option<String>
 }
 
 pub fn parse_route_attr_validator(args: TokenStream, item: TokenStream) -> manyhow::Result {
@@ -74,6 +78,9 @@ pub struct RouteInfo {
     pub data_field: Option<String>,
     pub channel_field: Option<String>,
     pub request_field: Option<String>,
+    pub about: Option<String>,
+    pub path: String,
+    pub full_path: String
 }
 
 pub fn parse_route(
@@ -91,7 +98,7 @@ pub fn parse_route(
         .filter_map(|(index, f)| {
             if let FnArg::Typed(PatType { pat, .. }) = f.clone() {
                 match *pat {
-                    Pat::Ident(PatIdent { ident, .. }) => Some((ident.to_string(), index)),
+                    Pat::Ident(PatIdent { ident, .. }) => Some((ident.to_string(), index - 1)),
                     _ => panic!("Unprocessable method argument: {:?}", f.clone()),
                 }
             } else {
@@ -109,7 +116,7 @@ pub fn parse_route(
 
     Ok(RouteInfo {
         handler_id,
-        prefix,
+        prefix: prefix.clone(),
         fields: all_fields,
         captures,
         data_field: args.data.clone().and_then(|f| Some(f.to_string())),
@@ -117,5 +124,8 @@ pub fn parse_route(
         request_field: args.request.clone().and_then(|f| Some(f.to_string())),
         selector,
         method_name: method.sig.ident.to_string(),
+        about: args.about.clone(),
+        path: args.path.clone(),
+        full_path: format!("{prefix}/{}", args.path.trim_matches('/'))
     })
 }
