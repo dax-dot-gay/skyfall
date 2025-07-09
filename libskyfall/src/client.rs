@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::{ collections::HashMap, fmt::Debug, sync::Arc };
 use async_channel::{ Receiver, Sender };
 use bon::Builder;
@@ -19,16 +21,22 @@ use crate::{
     ALPN,
 };
 
+/// Profile information, shared with trusted peers
 #[derive(Clone, Debug, Serialize, Deserialize, Builder)]
 pub struct Profile {
+    /// Profile ID
     #[builder(field = Uuid::new_v4())]
     pub id: Uuid,
 
+    /// Profile display name
     #[builder(default = Profile::default_name())]
     pub name: String,
 
+    /// Load-bearing pronouns
     #[builder(default)]
     pub pronouns: Vec<String>,
+
+    /// About blurb
     pub about: Option<String>,
 }
 
@@ -48,15 +56,24 @@ type PeerActiveProfile = Option<Uuid>;
 type PeerProfiles = HashMap<Uuid, Profile>;
 type PeerRoutes = HashMap<String, Route>;
 
+/// Peer data
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
+    /// Peer identity
     pub identity: PublicIdentity,
+
+    /// Active profile ID
     pub active_profile: Option<Uuid>,
+
+    /// Mapping of profiles
     pub profiles: HashMap<Uuid, Profile>,
+
+    /// Mapping of active routes
     pub routes: HashMap<String, Route>,
 }
 
 impl PeerInfo {
+    /// Return the ID string
     pub fn id(&self) -> String {
         self.identity.id.clone()
     }
@@ -81,6 +98,7 @@ impl From<Peer> for PeerInfo {
     }
 }
 
+/// Known peer (whether trusted or untrusted)
 #[derive(Clone, Debug, Serialize, Deserialize, EnumCommonFields)]
 #[common_field(identity as identity_ref: PublicIdentity)]
 #[common_field(mut_only identity as identity_mut: PublicIdentity)]
@@ -164,6 +182,7 @@ impl Into<NodeId> for Peer {
     }
 }
 
+/// Client events
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "snake_case", tag = "event")]
 pub enum ClientEvent {
@@ -195,6 +214,7 @@ pub struct ClientState {
     pub(self) relay_mode: RelayMode,
 }
 
+/// Primary client
 #[derive(Clone)]
 pub struct Client {
     state: Arc<RwLock<ClientState>>,
@@ -270,6 +290,7 @@ impl Client {
         })
     }
 
+    /// Construct from a saved state
     pub async fn from_state(state: ClientState) -> crate::Result<Self> {
         let (context_sender, context_receiver) = async_channel::unbounded::<ContextEvent>();
         let endpoint = Endpoint::builder()
@@ -297,6 +318,7 @@ impl Client {
         })
     }
 
+    /// Initialize client and send updated info to peers
     pub async fn initialize(&mut self) -> crate::Result<()> {
         if self.initialized {
             panic!("Already initialized!");
@@ -324,10 +346,12 @@ impl Client {
         Ok(())
     }
 
+    /// Convert into saved state
     pub fn into_state(self) -> ClientState {
         self.state.read().clone()
     }
 
+    /// Add handler
     pub fn with_handler(mut self, handler: impl Handler + 'static + Send + Sync) -> Self {
         if self.initialized {
             panic!("Cannot add a handler to an initialized client.");
@@ -349,24 +373,29 @@ impl Client {
         self
     }
 
+    /// Get identity
     pub fn identity(&self) -> Identity {
         self.state.read().identity.clone()
     }
 
+    /// Get profile mapping
     pub fn profiles(&self) -> HashMap<Uuid, Profile> {
         self.state.read().profiles.clone()
     }
 
+    /// Get a single profile
     pub fn profile(&self, id: Uuid) -> Option<Profile> {
         self.state.read().profiles.get(&id).cloned()
     }
 
+    /// Add a new profile
     pub async fn add_profile(&self, profile: Profile) -> crate::Result<()> {
         let _ = self.state.write().profiles.insert(profile.id.clone(), profile);
         // Update peers about this profile change
         Ok(())
     }
 
+    /// Remove a profile
     pub async fn remove_profile(&self, id: Uuid) -> crate::Result<()> {
         let _ = self.state.write().profiles.remove(&id);
         if
@@ -381,6 +410,7 @@ impl Client {
         Ok(())
     }
 
+    /// Set the active profile
     pub async fn set_active_profile(&self, id: Uuid) -> crate::Result<Profile> {
         if let Some(profile) = self.profile(id.clone()) {
             let mut state = self.state.write();
@@ -392,12 +422,14 @@ impl Client {
         }
     }
 
+    /// Set the active profile to [None]
     pub async fn clear_active_profile(&self) -> () {
         let mut state = self.state.write();
         state.active_profile = None;
         // Update peers about this profile change
     }
 
+    /// Retrieves the active profile, if any
     pub fn active_profile(&self) -> Option<Profile> {
         if let Some(active) = self.state.read().active_profile.clone() {
             self.profile(active)
@@ -406,14 +438,17 @@ impl Client {
         }
     }
 
+    /// Returns a list of all peers
     pub fn peers(&self) -> Vec<Peer> {
         self.state.read().known_peers.clone().values().cloned().collect()
     }
 
+    /// Gets a specific peer
     pub fn peer(&self, id: impl AsPeerId) -> Option<Peer> {
         self.state.read().known_peers.get(&id.as_peer_id()).cloned()
     }
 
+    /// Returns a list of all connected peers
     pub fn connected_peers(&self) -> Vec<Peer> {
         let mut result = Vec::new();
         let connected = self.context.connected_peers();
@@ -427,21 +462,25 @@ impl Client {
         result
     }
 
+    /// Checks if a peer is connected
     pub fn is_connected(&self, peer: impl Into<Peer>) -> bool {
         let peer: Peer = peer.into();
         let connected = self.context.connected_peers();
         connected.contains(&peer.identity())
     }
 
+    /// Adds a new peer (or updates it if it exists)
     pub fn insert_peer(&self, peer: impl Into<Peer>) -> bool {
         let peer: Peer = peer.into();
         self.state.write().known_peers.insert(peer.id(), peer).is_some()
     }
 
+    /// Removes a peer
     pub fn remove_peer(&self, id: impl AsPeerId) -> bool {
         self.state.write().known_peers.remove(&id.as_peer_id()).is_some()
     }
 
+    /// Connects to a peer by ID
     pub async fn connect_to(&self, peer: impl Into<NodeId>) -> crate::Result<Peer> {
         let peer: NodeId = peer.into();
 
@@ -451,6 +490,7 @@ impl Client {
         Ok(connected_peer)
     }
 
+    /// Sets the current peer info
     pub fn set_peer_info(
         &self,
         id: impl AsPeerId,
@@ -470,6 +510,7 @@ impl Client {
         }
     }
 
+    /// Gets current peer info
     pub fn peer_info(&self) -> PeerInfo {
         PeerInfo {
             identity: self.identity().as_public(),
@@ -479,6 +520,7 @@ impl Client {
         }
     }
 
+    /// Trust a peer by ID
     pub fn trust_peer(&self, id: impl AsPeerId) -> crate::Result<Peer> {
         let id = id.as_peer_id();
         if let Some(peer) = self.peer(id.clone()) {
@@ -489,6 +531,7 @@ impl Client {
         }
     }
 
+    /// Distrust a peer by ID
     pub fn distrust_peer(&self, id: impl AsPeerId) -> crate::Result<Peer> {
         let id = id.as_peer_id();
         if let Some(peer) = self.peer(id.clone()) {
@@ -499,6 +542,7 @@ impl Client {
         }
     }
 
+    /// Share peer info with a peer
     pub async fn share_info(&self, peer: impl Into<Peer>) -> crate::Result<()> {
         let peer: Peer = peer.into();
         if self.is_connected(peer.clone()) {
@@ -546,6 +590,7 @@ impl<S: State> ClientBuilder<S> {
 
 // Event loop for Client
 impl Client {
+    /// Gets a receiver of client events
     pub fn client_events(&self) -> Receiver<ClientEvent> {
         self.client_events.1.clone()
     }
@@ -674,6 +719,7 @@ impl Client {
 }
 
 impl Client {
+    /// Sends a command to a peer
     pub async fn send_command<Data: Serialize + DeserializeOwned>(
         &self,
         peer: impl AsPeerId,

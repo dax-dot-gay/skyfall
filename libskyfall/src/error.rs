@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::string::FromUtf8Error;
 
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,7 @@ use uuid::Uuid;
 
 use crate::{utils::AsPeerId, PublicIdentity};
 
+/// Errors in internal Iroh handling
 #[derive(thiserror::Error, Debug)]
 pub enum IrohError {
     #[error(transparent)]
@@ -32,6 +34,7 @@ pub enum IrohError {
     MaxNameLengthExceeded(#[from] iroh::node_info::MaxLengthExceededError)
 }
 
+/// Packet parsing error
 #[derive(thiserror::Error, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BadPacket {
     #[error("Missing magic number (packet is either misaligned or corrupted)")]
@@ -44,6 +47,7 @@ pub enum BadPacket {
     StartStopMismatch
 }
 
+/// Skyfall protocol error
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Encountered an error in the quantum-safe cryptography layer: {0:?}")]
@@ -116,6 +120,7 @@ impl<T: Into<IrohError>> From<T> for Error {
     }
 }
 
+#[allow(missing_docs)]
 impl Error {
     pub fn existing_connection(peer: &PublicIdentity) -> Self {
         Self::ExistingConnection(peer.id.clone())
@@ -162,4 +167,5 @@ impl Error {
     }
 }
 
+/// Simplified result type
 pub type Result<T> = std::result::Result<T, Error>;

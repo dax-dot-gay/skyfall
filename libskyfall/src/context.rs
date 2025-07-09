@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::{ collections::{ HashMap, HashSet }, fmt::Debug, ops::{ Deref, DerefMut }, sync::Arc };
 
 use aes_gcm::{ aead::{ Aead, AeadCore, OsRng }, Aes256Gcm, Key, KeyInit };

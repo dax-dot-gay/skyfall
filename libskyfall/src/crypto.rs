@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use aes_gcm::Nonce;
 use bon::bon;
 use oqs::{kem::Ciphertext, sig::Signature};

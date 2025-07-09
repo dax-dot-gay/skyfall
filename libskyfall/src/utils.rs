@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use iroh::{RelayMap, RelayMode as IrohRelayMode, RelayUrl};
