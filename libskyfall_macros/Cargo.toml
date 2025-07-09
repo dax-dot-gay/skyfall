@@ -1,0 +1,16 @@
+[lib]
+proc-macro = true
+
+[package]
+name = "libskyfall_macros"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+convert_case = "0.8.0"
+darling = "0.20.11"
+manyhow = { version = "0.11.4", features = ["darling"] }
+proc-macro2 = "1.0.95"
+quote = "1.0.40"
+regex = "1.11.1"
+syn = { version = "2.0.104", features = ["full"] }

@@ -30,3 +30,4 @@ async-channel = { workspace = true }
 enum_common_fields = { workspace = true }
 async-trait = { workspace = true }
 base16ct = { workspace = true, features = ["alloc", "std"] }
+libskyfall_macros = {workspace = true}

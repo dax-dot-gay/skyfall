@@ -49,6 +49,10 @@ pub struct Route {
     /// Whether to open a stream
     #[builder(default)]
     pub stream: bool,
+
+    #[builder(into)]
+    /// Optional about/help text
+    pub about: Option<String>
 }
 
 impl Route {
@@ -60,6 +64,7 @@ impl Route {
     /// - `path` (`impl AsRef<str>`) - Route path
     /// - `expects_data` (`bool`) - Whether to provide JSON data
     /// - `expects_stream` (`bool`) - Whether to open a stream
+    /// - `about` (`Option<impl AsRef<str>>`) - Optional help/about text
     /// 
     /// # Returns
     /// 
@@ -69,13 +74,15 @@ impl Route {
         selector: impl AsRef<str>,
         path: impl AsRef<str>,
         expects_data: bool,
-        expects_stream: bool
+        expects_stream: bool,
+        about: Option<impl AsRef<str>>
     ) -> Self {
         Self {
             selector: selector.as_ref().to_string(),
             path: path.as_ref().to_string(),
             data: expects_data,
             stream: expects_stream,
+            about: about.and_then(|a| Some(a.as_ref().to_string()))
         }
     }
 }
@@ -85,6 +92,11 @@ impl Route {
 pub trait Handler {
     /// Handler namespace - should be unique
     fn id(&self) -> String;
+
+    /// Handler about/help text
+    fn about(&self) -> Option<String> {
+        None
+    }
 
     /// Returns an (ideally static) mapping of selector:route
     fn get_routes(&self) -> HashMap<String, Route>;
@@ -102,4 +114,14 @@ pub trait Handler {
         data: Option<Value>,
         stream: Option<Channel>
     ) -> anyhow::Result<()>;
+}
+
+#[derive(Clone, Debug)]
+pub struct Request {
+    pub selector: String,
+    pub path: String,
+    pub client: Client,
+    pub peer: Peer,
+    pub route: Route,
+    pub id: Uuid
 }

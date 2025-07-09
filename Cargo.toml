@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["libskyfall", "clients/skyfall-desktop/src-tauri", "skyfall_testing"]
+members = ["libskyfall", "clients/skyfall-desktop/src-tauri", "skyfall_testing", "libskyfall_macros"]
 
 [workspace.dependencies]
 aes-gcm = "0.10.3"
@@ -30,6 +30,7 @@ tokio = "1.46.1"
 typenum = "1.18.0"
 uuid = "1.17.0"
 libskyfall = {path = "./libskyfall", version = "0.1.0"}
+libskyfall_macros = {path = "./libskyfall_macros", version = "0.1.0"}
 async-trait = "0.1.88"
 base16ct = "0.2.0"
 enum_common_fields = "0.7.0"
