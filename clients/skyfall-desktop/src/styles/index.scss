@@ -1,0 +1,35 @@
+.titlebar {
+    padding-left: var(--mantine-spacing-xs);
+    background-color: var(--mantine-primary-color-light);
+    margin: var(--mantine-spacing-xs);
+    margin-bottom: 0px;
+    border-radius: var(--mantine-radius-xs);
+
+    .titlebar-buttons button svg {
+        color: var(--mantine-primary-color-contrast);
+    }
+
+    .titlebar-buttons button:hover {
+        background-color: var(--mantine-primary-color-light-hover);
+        &:last-child {
+            background-color: var(--mantine-color-red-filled-hover);
+        }
+        
+    }
+
+    .titlebar-content {
+        flex-grow: 1;
+        height: 32px;
+    }
+}
+
+.app-main {
+    position: absolute;
+    top: calc(32px + var(--mantine-spacing-xs));
+    left: 0px;
+    display: inline-block;
+    width: 100vw;
+    height: calc(100vh - calc(32px + var(--mantine-spacing-xs)));
+    overflow-y: auto;
+    overflow-x: hidden;
+}

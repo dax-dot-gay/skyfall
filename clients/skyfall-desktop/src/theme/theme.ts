@@ -108,6 +108,7 @@ export const shadcnTheme: MantineThemeOverride = createTheme({
   autoContrast: true,
   luminanceThreshold: 0.3,
   fontFamily: "Geist",
+  fontFamilyMonospace: "Geist Mono",
   radius: {
     xs: rem("6px"),
     sm: rem("8px"),
@@ -115,7 +116,7 @@ export const shadcnTheme: MantineThemeOverride = createTheme({
     lg: rem("16px"),
     xl: rem("24px"),
   },
-  defaultRadius: "sm",
+  defaultRadius: "xs",
   spacing: {
     "4xs": rem("2px"),
     "3xs": rem("4px"),
