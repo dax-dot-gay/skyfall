@@ -4,7 +4,8 @@ use std::{ collections::HashMap, fmt::Debug, sync::Arc };
 use async_channel::{ Receiver, Sender };
 use bon::Builder;
 use enum_common_fields::EnumCommonFields;
-use iroh::{Endpoint, NodeId};
+use futures::{ stream::FuturesUnordered, StreamExt };
+use iroh::{ Endpoint, NodeId };
 use parking_lot::RwLock;
 use serde::{ de::DeserializeOwned, Deserialize, Serialize };
 use serde_json::Value;
@@ -261,7 +262,9 @@ impl Client {
             .discovery_dht()
             .discovery_local_network()
             .discovery_n0()
-            .user_data_for_discovery(format!("/{}/{}", identity.id(), identity.identifier()).try_into()?)
+            .user_data_for_discovery(
+                format!("/{}/{}", identity.id(), identity.identifier()).try_into()?
+            )
             .relay_mode(relay_mode.clone().into())
             .alpns(vec![ALPN.to_vec()])
             .secret_key(identity.iroh_secret())
@@ -297,7 +300,9 @@ impl Client {
             .discovery_dht()
             .discovery_local_network()
             .discovery_n0()
-            .user_data_for_discovery(format!("/{}/{}", state.identity.id(), state.identity.identifier()).try_into()?)
+            .user_data_for_discovery(
+                format!("/{}/{}", state.identity.id(), state.identity.identifier()).try_into()?
+            )
             .relay_mode(state.relay_mode.clone().into())
             .alpns(vec![ALPN.to_vec()])
             .secret_key(state.identity.iroh_secret())
@@ -373,6 +378,38 @@ impl Client {
         self
     }
 
+    pub async fn broadcast_to_connected_peers(
+        &self,
+        message: InterfaceMessage
+    ) -> HashMap<String, (Peer, crate::Result<()>)> {
+        let futures: FuturesUnordered<_> = self
+            .connected_peers()
+            .iter()
+            .map(|f| {
+                let ctx = self.context.clone();
+                let peer = f.clone();
+                let msg = message.clone();
+
+                async move {
+                    match ctx.send_message_to_peer(peer.id(), msg.clone()).await {
+                        Ok(_) => (peer, Ok(())),
+                        Err(e) => (peer, Err(e)),
+                    }
+                }
+            })
+            .collect();
+
+        futures.map(|(peer, result)| (peer.id(), (peer, result))).collect().await
+    }
+
+    pub async fn share_info_with_peers(&self) -> HashMap<String, (Peer, crate::Result<()>)> {
+        self.broadcast_to_connected_peers(crate::utils::InterfaceMessage::IdentifySelf {
+            profiles: self.profiles(),
+            active_profile: self.active_profile().and_then(|p| Some(p.id)),
+            routes: self.routes.clone(),
+        }).await
+    }
+
     /// Get identity
     pub fn identity(&self) -> Identity {
         self.state.read().identity.clone()
@@ -391,7 +428,7 @@ impl Client {
     /// Add a new profile
     pub async fn add_profile(&self, profile: Profile) -> crate::Result<()> {
         let _ = self.state.write().profiles.insert(profile.id.clone(), profile);
-        // Update peers about this profile change
+        self.share_info_with_peers().await;
         Ok(())
     }
 
@@ -406,7 +443,7 @@ impl Client {
         {
             self.clear_active_profile().await;
         }
-        // Update peers about this profile change
+        self.share_info_with_peers().await;
         Ok(())
     }
 
@@ -415,7 +452,7 @@ impl Client {
         if let Some(profile) = self.profile(id.clone()) {
             let mut state = self.state.write();
             state.active_profile = Some(id);
-            // Update peers about this profile change
+            self.share_info_with_peers().await;
             Ok(profile)
         } else {
             Err(crate::Error::unknown_profile(id))
@@ -426,7 +463,7 @@ impl Client {
     pub async fn clear_active_profile(&self) -> () {
         let mut state = self.state.write();
         state.active_profile = None;
-        // Update peers about this profile change
+        self.share_info_with_peers().await;
     }
 
     /// Retrieves the active profile, if any
