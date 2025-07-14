@@ -2,6 +2,7 @@ name: Publish Rust
 
 on:
   release:
+    types: [published]
   workflow_dispatch:
 
 env:
