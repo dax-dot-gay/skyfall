@@ -2,10 +2,12 @@
 name = "skyfall_testing"
 version = "0.1.0"
 edition = "2024"
+readme = "../README.md"
+repository = "https://github.com/dax-dot-gay/skyfall"
 
 [dependencies]
-libskyfall = {workspace = true}
-tokio = {workspace = true, features = ["full"]}
-iroh = { workspace = true, features = ["discovery-local-network", "discovery-pkarr-dht"] }
-names = {workspace = true}
-base16ct = { workspace = true, features = ["alloc", "std"] }
+libskyfall = {path = "../libskyfall"}
+tokio = {version = "1.46.1", features = ["full"]}
+iroh = { version = "0.90.0", features = ["discovery-local-network", "discovery-pkarr-dht"] }
+names = {version = "0.14.0", default-features = false}
+base16ct = { version = "0.2.0", features = ["alloc", "std"] }

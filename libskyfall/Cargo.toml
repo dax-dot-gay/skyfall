@@ -2,6 +2,11 @@
 name = "libskyfall"
 version = "0.1.0"
 edition = "2024"
+readme = "../README.md"
+repository = "https://github.com/dax-dot-gay/skyfall"
+license = "MIT"
+description = "Quantum-Safe P2P Communication System"
+homepage = "https://github.com/dax-dot-gay/skyfall"
 
 [dependencies]
 aes-gcm = { workspace = true, features = ["std", "stream"] }

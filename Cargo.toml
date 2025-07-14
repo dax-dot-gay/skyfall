@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["libskyfall", "skyfall_testing", "libskyfall_macros"]
+members = ["libskyfall", "libskyfall_macros"]
+exclude = ["skyfall_testing"]
 
 [workspace.dependencies]
 aes-gcm = "0.10.3"
