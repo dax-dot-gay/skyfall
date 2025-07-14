@@ -7,6 +7,8 @@ repository = "https://github.com/dax-dot-gay/skyfall"
 license = "MIT"
 description = "Quantum-Safe P2P Communication System"
 homepage = "https://github.com/dax-dot-gay/skyfall"
+keywords = ["p2p", "network", "quantum-safe", "iroh"]
+categories = ["network-programming", "cryptography"]
 
 [dependencies]
 aes-gcm = { workspace = true, features = ["std", "stream"] }
