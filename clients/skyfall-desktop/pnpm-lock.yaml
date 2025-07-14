@@ -68,6 +68,9 @@ importers:
       tauri-controls:
         specifier: ^0.4.0
         version: 0.4.0(clsx@2.1.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tailwind-merge@3.3.1)
+      taurpc:
+        specifier: ^1.8.1
+        version: 1.8.1
       zustand:
         specifier: ^5.0.6
         version: 5.0.6(@types/react@18.3.23)(react@18.3.1)
@@ -1136,6 +1139,9 @@ packages:
       react-dom: ^18.2.0
       tailwind-merge: ^1.14.0
 
+  taurpc@1.8.1:
+    resolution: {integrity: sha512-qfR1ekhXApjbnWAqyE5qpDa/oMmKBwjNNDuqjYn7sO+ChI5qwQ4J/fS+00dVLE3I0lbZDizyY8ObSFBz3MRerQ==}
+
   tinyglobby@0.2.14:
     resolution: {integrity: sha512-tX5e7OM1HnYr2+a2C/4V0htOcSQcoSTH9KgJnVvNm5zm/cyEWKJ7j7YutsH9CxMdtOkkLFy2AHrMci9IM8IPZQ==}
     engines: {node: '>=12.0.0'}
@@ -2193,6 +2199,10 @@ snapshots:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
       tailwind-merge: 3.3.1
+
+  taurpc@1.8.1:
+    dependencies:
+      '@tauri-apps/api': 2.6.0
 
   tinyglobby@0.2.14:
     dependencies:
